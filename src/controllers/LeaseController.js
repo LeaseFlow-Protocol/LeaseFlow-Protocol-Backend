@@ -62,6 +62,34 @@ class LeaseController {
             return res.status(500).json({ error: "Internal server error during handshake retrieval.", details: error.message });
         }
     }
+    /**
+     * Retrieves all active leases from the database.
+     * @route GET /api/leases/active
+     */
+    async getActiveLeases(req, res) {
+        try {
+            // Retrieve the database from app locals (injected in index.js)
+            const database = req.app.locals.database;
+            if (!database) {
+                console.warn("[LeaseController] Database not found in app.locals.");
+                return res.status(500).json({ error: "Database service unavailable." });
+            }
+
+            const allLeases = await database.listLeases();
+            const activeLeases = allLeases.filter(lease => lease.status === 'active' || lease.status === 'ACTIVE');
+
+            console.log(`[LeaseController] Found ${activeLeases.length} active leases.`);
+
+            return res.status(200).json({
+                status: 'success',
+                message: 'Active leases retrieved successfully.',
+                data: activeLeases
+            });
+        } catch (error) {
+            console.error('[LeaseController] Error fetching active leases:', error);
+            return res.status(500).json({ error: 'Internal server error while retrieving active leases.', details: error.message });
+        }
+    }
 }
 
 module.exports = new LeaseController();
