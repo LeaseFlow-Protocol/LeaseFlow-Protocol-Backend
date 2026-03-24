@@ -49,6 +49,7 @@ const fs = require('fs');
 const sharp = require('sharp');
 const app = express();
 const port = 3000;
+const creditScoreAggregator = new TenantCreditScoreAggregator();
 const listings = [];
 const HORIZON_URL = process.env.HORIZON_URL || 'https://horizon.stellar.org';
 
@@ -376,6 +377,7 @@ app.get('/', (req, res) => {
     }
   });
 
+app.post('/tenant-credit-score', (req, res) => {
   return app;
 }
 
@@ -415,33 +417,23 @@ app.post('/listings', async (req, res) => {
 // Availability endpoints
 app.get('/api/asset/:id/availability', async (req, res) => {
   try {
-    const { id } = req.params;
-
-    if (!id || isNaN(id)) {
-      return res.status(400).json({
-        error: 'Invalid asset ID. Must be a number.',
-        code: 'INVALID_ASSET_ID'
-      });
-    }
-
-    const availability = await availabilityService.getAssetAvailability(id);
-
-    res.json({
-      success: true,
-      data: availability
-    });
-
+    const { tenantId, metrics = {}, cacheTtlSeconds } = req.body || {};
+    const result = creditScoreAggregator.getOrCompute(tenantId, metrics, cacheTtlSeconds);
+    res.status(200).json(result);
   } catch (error) {
-    console.error(`Error fetching availability for asset ${req.params.id}:`, error);
-
-    res.status(500).json({
-      error: 'Failed to fetch asset availability',
-      code: 'FETCH_ERROR',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+    res.status(400).json({ error: error.message });
   }
 });
 
+app.get('/tenant-credit-score/:tenantId', (req, res) => {
+  const cached = creditScoreAggregator.getCached(req.params.tenantId);
+  if (!cached) {
+    return res.status(404).json({ error: 'No cached score found for tenant' });
+  }
+  return res.status(200).json(cached);
+});
+
+app.post('/tenant-credit-score/share-token', (req, res) => {
 // Error handling
 app.use((err, req, res, next) => {
   console.error('[App] Unhandled Error:', err);
@@ -450,41 +442,24 @@ app.use((err, req, res, next) => {
 
 app.get('/api/assets/availability', async (req, res) => {
   try {
-    const { ids } = req.query;
-
-    if (ids) {
-      const assetIds = ids.split(',').map(id => id.trim()).filter(id => id && !isNaN(id));
-
-      if (assetIds.length === 0) {
-        return res.status(400).json({
-          error: 'No valid asset IDs provided',
-          code: 'INVALID_ASSET_IDS'
-        });
-      }
-
-      const availability = await availabilityService.getMultipleAssetAvailability(assetIds);
-
-      res.json({
-        success: true,
-        data: availability
-      });
-    } else {
-      const availability = await availabilityService.getAllAssetsAvailability();
-
-      res.json({
-        success: true,
-        data: availability
-      });
-    }
-
+    const { tenantId, tokenTtlSeconds } = req.body || {};
+    const result = creditScoreAggregator.generateShareToken(tenantId, tokenTtlSeconds);
+    res.status(200).json(result);
   } catch (error) {
-    console.error('Error fetching assets availability:', error);
+    res.status(400).json({ error: error.message });
+  }
+});
 
-    res.status(500).json({
-      error: 'Failed to fetch assets availability',
-      code: 'FETCH_ERROR',
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
-    });
+app.post('/tenant-credit-score/verify-token', (req, res) => {
+  try {
+    const { token } = req.body || {};
+    if (!token) {
+      throw new Error('token is required');
+    }
+    const payload = creditScoreAggregator.verifyShareToken(token);
+    res.status(200).json({ valid: true, payload });
+  } catch (error) {
+    res.status(400).json({ valid: false, error: error.message });
   }
 });
 
