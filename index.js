@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const leaseRoutes = require('./src/routes/leaseRoutes');
+const ownerRoutes = require('./src/routes/ownerRoutes');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -13,6 +14,7 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Routes
 app.use('/api/leases', leaseRoutes);
+app.use('/api/owners', ownerRoutes);
 
 app.get('/', (req, res) => {
   res.json({ 
@@ -23,7 +25,8 @@ app.get('/', (req, res) => {
     contract_id: process.env.CONTRACT_ID || 'CAEGD57WVTVQSYWYB23AISBW334QO7WNA5XQ56S45GH6BP3D2AVHKUG4',
     endpoints: {
       upload_lease: 'POST /api/leases/upload',
-      view_lease_handshake: 'GET /api/leases/:leaseCID/handshake'
+      view_lease_handshake: 'GET /api/leases/:leaseCID/handshake',
+      top_owners: 'GET /api/owners/top'
     }
   });
 });
