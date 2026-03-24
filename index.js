@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { checkAndInitializeLease, getLeases, saveLeases } = require('./worker');
 const leaseRoutes = require('./src/routes/leaseRoutes');
 const ownerRoutes = require('./src/routes/ownerRoutes');
 
@@ -485,6 +486,43 @@ app.get('/api/assets/availability', async (req, res) => {
       details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
+});
+
+app.get('/leases', (req, res) => {
+  res.json(getLeases());
+});
+
+app.post('/sign-lease', async (req, res) => {
+  const { leaseId, role, signature } = req.body;
+  const leases = getLeases();
+  const lease = leases[leaseId];
+
+  if (!lease) {
+    return res.status(404).json({ error: `Lease ${leaseId} not found.` });
+  }
+
+  // SIWS Signature verification (Simulation)
+  if (!signature) {
+    return res.status(400).json({ error: 'Signature required.' });
+  }
+
+  if (role === 'LANDLORD') {
+    lease.landlord_signed = true;
+    lease.landlord_signature = signature;
+  } else if (role === 'TENANT') {
+    lease.tenant_signed = true;
+    lease.tenant_signature = signature;
+  } else {
+    return res.status(400).json({ error: 'Invalid role.' });
+  }
+
+  saveLeases(leases);
+  console.log(`[API] Lease ${leaseId} signed by ${role}. Checking coordination...`);
+  
+  // Call coordination worker
+  await checkAndInitializeLease(leaseId);
+  
+  res.json({ message: `Lease ${leaseId} signed by ${role}.`, state: leases[leaseId] });
 });
 
 // Asset metadata endpoints

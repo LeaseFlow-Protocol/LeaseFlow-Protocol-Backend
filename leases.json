@@ -1,0 +1,9 @@
+{
+  "test_lease": {
+    "landlord_signed": true,
+    "tenant_signed": true,
+    "initialized_on_chain": true,
+    "status": "INITIALIZED",
+    "contract_data": {}
+  }
+}
