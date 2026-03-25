@@ -3,12 +3,42 @@ const LeaseStorage = require('../services/Encrypted_IPFS_Lease_Storage');
 class LeaseController {
     /**
      * Uploads the PDF lease agreement to IPFS after encryption.
+     * Validates KYC compliance before allowing lease upload.
      */
     async uploadLease(req, res) {
         try {
-            const { tenantPubKey, landlordPubKey } = req.body;
+            const { tenantPubKey, landlordPubKey, landlordId, tenantId } = req.body;
             if (!req.file || !tenantPubKey || !landlordPubKey) {
                 return res.status(400).json({ error: "Missing required fields (file, tenantPubKey, landlordPubKey)." });
+            }
+
+            // Get database from app locals
+            const database = req.app.locals.database;
+            if (!database) {
+                console.warn("[LeaseController] Database not found in app.locals.");
+                return res.status(500).json({ error: "Database service unavailable." });
+            }
+
+            // If actor IDs are provided, validate KYC compliance
+            if (landlordId && tenantId) {
+                console.log(`[LeaseController] Checking KYC compliance for landlord ${landlordId} and tenant ${tenantId}`);
+                
+                const compliance = database.checkLeaseKycCompliance(landlordId, tenantId);
+                
+                if (!compliance.leaseCanProceed) {
+                    const missingKyc = [];
+                    if (!compliance.landlord.isVerified) missingKyc.push('landlord');
+                    if (!compliance.tenant.isVerified) missingKyc.push('tenant');
+                    
+                    return res.status(403).json({ 
+                        error: "KYC verification required",
+                        message: `KYC verification is required for: ${missingKyc.join(', ')}`,
+                        compliance,
+                        kycRequired: true
+                    });
+                }
+                
+                console.log(`[LeaseController] KYC compliance verified for both parties`);
             }
 
             console.log(`[LeaseController] Encrypting and uploading lease for parties ${tenantPubKey.slice(0, 8)} and ${landlordPubKey.slice(0, 8)}...`);
@@ -25,8 +55,11 @@ class LeaseController {
             // Return CID. Backend "stores" only this.
             return res.status(201).json({ 
                 status: "success",
-                message: "Lease record created and uploaded to IPFS.",
-                leaseCID 
+                message: landlordId && tenantId 
+                    ? "Lease record created and uploaded to IPFS. KYC compliance verified."
+                    : "Lease record created and uploaded to IPFS.",
+                leaseCID,
+                kycVerified: landlordId && tenantId ? true : null
             });
         } catch (error) {
             console.error("[LeaseController] Error uploading lease:", error);

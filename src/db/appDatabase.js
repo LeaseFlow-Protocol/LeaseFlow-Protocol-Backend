@@ -125,6 +125,32 @@ class AppDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_payment_history_paid_at
         ON payment_history (paid_at);
+
+      CREATE TABLE IF NOT EXISTS kyc_verifications (
+        id TEXT PRIMARY KEY,
+        actor_id TEXT NOT NULL,
+        actor_role TEXT NOT NULL CHECK (actor_role IN ('landlord', 'tenant')),
+        stellar_account_id TEXT,
+        kyc_status TEXT NOT NULL DEFAULT 'pending' CHECK (kyc_status IN ('pending', 'in_progress', 'verified', 'rejected')),
+        anchor_provider TEXT NOT NULL,
+        verification_reference TEXT,
+        submitted_at TEXT,
+        verified_at TEXT,
+        rejected_at TEXT,
+        rejection_reason TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(actor_id, actor_role)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_kyc_verifications_actor
+        ON kyc_verifications (actor_id, actor_role);
+
+      CREATE INDEX IF NOT EXISTS idx_kyc_verifications_status
+        ON kyc_verifications (kyc_status);
+
+      CREATE INDEX IF NOT EXISTS idx_kyc_verifications_stellar_account
+        ON kyc_verifications (stellar_account_id);
     `);
   }
 
@@ -699,6 +725,180 @@ class AppDatabase {
 
     return row ? normalizeLeaseRow(row) : null;
   }
+
+  // ---------------------------------------------------------------------------
+  // KYC Verification methods (SEP-12 Stellar Anchor Integration)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Insert or update a KYC verification record.
+   *
+   * @param {object} kycData KYC verification data.
+   * @returns {object} The inserted/updated KYC record.
+   */
+  upsertKycVerification(kycData) {
+    const now = new Date().toISOString();
+    const id = kycData.id || crypto.randomUUID();
+    
+    this.db
+      .prepare(
+        `INSERT INTO kyc_verifications (
+           id, actor_id, actor_role, stellar_account_id, kyc_status, anchor_provider,
+           verification_reference, submitted_at, verified_at, rejected_at, rejection_reason,
+           created_at, updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(actor_id, actor_role) DO UPDATE SET
+           stellar_account_id = excluded.stellar_account_id,
+           kyc_status = excluded.kyc_status,
+           anchor_provider = excluded.anchor_provider,
+           verification_reference = excluded.verification_reference,
+           submitted_at = excluded.submitted_at,
+           verified_at = excluded.verified_at,
+           rejected_at = excluded.rejected_at,
+           rejection_reason = excluded.rejection_reason,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        id,
+        kycData.actorId,
+        kycData.actorRole,
+        kycData.stellarAccountId || null,
+        kycData.kycStatus || 'pending',
+        kycData.anchorProvider,
+        kycData.verificationReference || null,
+        kycData.submittedAt || null,
+        kycData.verifiedAt || null,
+        kycData.rejectedAt || null,
+        kycData.rejectionReason || null,
+        kycData.createdAt || now,
+        now,
+      );
+
+    return this.getKycVerificationByActor(kycData.actorId, kycData.actorRole);
+  }
+
+  /**
+   * Fetch a KYC verification record by actor.
+   *
+   * @param {string} actorId Actor identifier.
+   * @param {string} actorRole Actor role ('landlord' or 'tenant').
+   * @returns {object|null}
+   */
+  getKycVerificationByActor(actorId, actorRole) {
+    const row = this.db
+      .prepare(
+        `SELECT
+           id,
+           actor_id AS actorId,
+           actor_role AS actorRole,
+           stellar_account_id AS stellarAccountId,
+           kyc_status AS kycStatus,
+           anchor_provider AS anchorProvider,
+           verification_reference AS verificationReference,
+           submitted_at AS submittedAt,
+           verified_at AS verifiedAt,
+           rejected_at AS rejectedAt,
+           rejection_reason AS rejectionReason,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM kyc_verifications
+         WHERE actor_id = ? AND actor_role = ?`,
+      )
+      .get(actorId, actorRole);
+
+    return row ? normalizeKycRow(row) : null;
+  }
+
+  /**
+   * Fetch a KYC verification record by Stellar account.
+   *
+   * @param {string} stellarAccountId Stellar account address.
+   * @returns {object|null}
+   */
+  getKycVerificationByStellarAccount(stellarAccountId) {
+    const row = this.db
+      .prepare(
+        `SELECT
+           id,
+           actor_id AS actorId,
+           actor_role AS actorRole,
+           stellar_account_id AS stellarAccountId,
+           kyc_status AS kycStatus,
+           anchor_provider AS anchorProvider,
+           verification_reference AS verificationReference,
+           submitted_at AS submittedAt,
+           verified_at AS verifiedAt,
+           rejected_at AS rejectedAt,
+           rejection_reason AS rejectionReason,
+           created_at AS createdAt,
+           updated_at AS updatedAt
+         FROM kyc_verifications
+         WHERE stellar_account_id = ?`,
+      )
+      .get(stellarAccountId);
+
+    return row ? normalizeKycRow(row) : null;
+  }
+
+  /**
+   * Update KYC verification status.
+   *
+   * @param {string} actorId Actor identifier.
+   * @param {string} actorRole Actor role.
+   * @param {string} newStatus New KYC status.
+   * @param {object} additionalFields Additional fields to update.
+   * @returns {object|null}
+   */
+  updateKycStatus(actorId, actorRole, newStatus, additionalFields = {}) {
+    const now = new Date().toISOString();
+    const updateFields = {
+      kyc_status: newStatus,
+      updated_at: now,
+      ...additionalFields
+    };
+
+    const setClause = Object.keys(updateFields).map(key => `${key} = ?`).join(', ');
+    const values = Object.values(updateFields);
+
+    this.db
+      .prepare(
+        `UPDATE kyc_verifications
+         SET ${setClause}
+         WHERE actor_id = ? AND actor_role = ?`,
+      )
+      .run(...values, actorId, actorRole);
+
+    return this.getKycVerificationByActor(actorId, actorRole);
+  }
+
+  /**
+   * Check if both landlord and tenant are verified for a lease.
+   *
+   * @param {string} landlordId Landlord identifier.
+   * @param {string} tenantId Tenant identifier.
+   * @returns {object} Verification status for both parties.
+   */
+  checkLeaseKycCompliance(landlordId, tenantId) {
+    const landlordKyc = this.getKycVerificationByActor(landlordId, 'landlord');
+    const tenantKyc = this.getKycVerificationByActor(tenantId, 'tenant');
+
+    return {
+      landlord: {
+        id: landlordId,
+        isVerified: landlordKyc?.kycStatus === 'verified',
+        kycStatus: landlordKyc?.kycStatus || 'not_started',
+        verification: landlordKyc
+      },
+      tenant: {
+        id: tenantId,
+        isVerified: tenantKyc?.kycStatus === 'verified',
+        kycStatus: tenantKyc?.kycStatus || 'not_started',
+        verification: tenantKyc
+      },
+      leaseCanProceed: (landlordKyc?.kycStatus === 'verified' && tenantKyc?.kycStatus === 'verified')
+    };
+  }
 }
 
 function normalizeLeaseRow(row) {
@@ -725,6 +925,13 @@ function normalizeProposalRow(row) {
     sorobanContractReference: row.sorobanContractReference
       ? JSON.parse(row.sorobanContractReference)
       : null,
+  };
+}
+
+function normalizeKycRow(row) {
+  return {
+    ...row,
+    isVerified: row.kycStatus === 'verified'
   };
 }
 
