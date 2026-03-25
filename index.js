@@ -31,12 +31,14 @@ const { createFileConditionProofStore } = require('./services/conditionProofStor
 const { createSecurityDepositLockService, requireLockedSecurityDeposit } = require('./services/securityDepositLock');
 const { TenantCreditScoreAggregator } = require('./tenantCreditScoreAggregator');
 const SanctionsListScreeningWorker = require('./services/sanctionsListScreeningWorker');
+const EmergencyEvictionNoticeService = require('./services/emergencyEvictionNoticeService');
 
 // Routes
 const leaseRoutes = require('./src/routes/leaseRoutes');
 const ownerRoutes = require('./src/routes/ownerRoutes');
 const kycRoutes = require('./src/routes/kycRoutes');
 const sanctionsRoutes = require('./src/routes/sanctionsRoutes');
+const evictionNoticeRoutes = require('./src/routes/evictionNoticeRoutes');
 
 /**
  * Build authentication middleware for landlords and tenants.
@@ -120,6 +122,7 @@ function createApp(dependencies = {}) {
   app.use('/api/owners', ownerRoutes);
   app.use('/api/kyc', kycRoutes);
   app.use('/api/sanctions', sanctionsRoutes);
+  app.use('/api/eviction-notices', evictionNoticeRoutes);
 
   // --- Lease Renewal Routes ---
   app.get('/renewal-proposals/:proposalId', requireActorAuth(actorAuthService), (req, res) => {
