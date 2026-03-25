@@ -18,56 +18,61 @@ Automated late fee enforcement removes the need for landlord–tenant confrontat
 ## Database Tables
 
 ### `late_fee_terms`
-| Column | Type | Description |
-|---|---|---|
-| `id` | TEXT PK | Unique identifier |
-| `lease_id` | TEXT UNIQUE | Associated lease |
-| `daily_rate` | INTEGER | Fee per day late (in smallest currency unit) |
-| `grace_period_days` | INTEGER | Days after the 1st before fees start (default: 5) |
-| `max_fee_per_period` | INTEGER | Optional cap per billing period |
-| `enabled` | INTEGER | Whether enforcement is active |
+
+| Column               | Type        | Description                                       |
+| -------------------- | ----------- | ------------------------------------------------- |
+| `id`                 | TEXT PK     | Unique identifier                                 |
+| `lease_id`           | TEXT UNIQUE | Associated lease                                  |
+| `daily_rate`         | INTEGER     | Fee per day late (in smallest currency unit)      |
+| `grace_period_days`  | INTEGER     | Days after the 1st before fees start (default: 5) |
+| `max_fee_per_period` | INTEGER     | Optional cap per billing period                   |
+| `enabled`            | INTEGER     | Whether enforcement is active                     |
 
 ### `rent_payments`
-| Column | Type | Description |
-|---|---|---|
-| `id` | TEXT PK | Unique identifier |
-| `lease_id` | TEXT | Associated lease |
-| `period` | TEXT | Billing period (e.g., `2026-03`) |
-| `due_date` | TEXT | Payment due date |
-| `amount_due` | INTEGER | Rent amount owed |
-| `amount_paid` | INTEGER | Amount received |
-| `date_paid` | TEXT | When payment was received |
-| `status` | TEXT | `pending` / `paid` / `partial` |
+
+| Column        | Type    | Description                      |
+| ------------- | ------- | -------------------------------- |
+| `id`          | TEXT PK | Unique identifier                |
+| `lease_id`    | TEXT    | Associated lease                 |
+| `period`      | TEXT    | Billing period (e.g., `2026-03`) |
+| `due_date`    | TEXT    | Payment due date                 |
+| `amount_due`  | INTEGER | Rent amount owed                 |
+| `amount_paid` | INTEGER | Amount received                  |
+| `date_paid`   | TEXT    | When payment was received        |
+| `status`      | TEXT    | `pending` / `paid` / `partial`   |
 
 ### `late_fee_ledger`
-| Column | Type | Description |
-|---|---|---|
-| `id` | TEXT PK | Unique identifier |
-| `lease_id` | TEXT | Associated lease |
-| `rent_payment_id` | TEXT | The overdue payment |
-| `period` | TEXT | Billing period |
-| `days_late` | INTEGER | Days overdue at assessment time |
-| `daily_rate` | INTEGER | Rate applied |
-| `fee_amount` | INTEGER | Cumulative fee for this entry |
+
+| Column               | Type    | Description                                   |
+| -------------------- | ------- | --------------------------------------------- |
+| `id`                 | TEXT PK | Unique identifier                             |
+| `lease_id`           | TEXT    | Associated lease                              |
+| `rent_payment_id`    | TEXT    | The overdue payment                           |
+| `period`             | TEXT    | Billing period                                |
+| `days_late`          | INTEGER | Days overdue at assessment time               |
+| `daily_rate`         | INTEGER | Rate applied                                  |
+| `fee_amount`         | INTEGER | Cumulative fee for this entry                 |
 | `pending_debt_total` | INTEGER | Running total of all late fees for this lease |
-| `soroban_tx_status` | TEXT | `pending` / `confirmed` / `failed` |
-| `soroban_tx_hash` | TEXT | On-chain transaction hash |
-| `assessed_at` | TEXT | Date the fee was assessed |
+| `soroban_tx_status`  | TEXT    | `pending` / `confirmed` / `failed`            |
+| `soroban_tx_hash`    | TEXT    | On-chain transaction hash                     |
+| `assessed_at`        | TEXT    | Date the fee was assessed                     |
 
 ## API Endpoints
 
 ### `GET /api/late-fees/:leaseId`
+
 Returns the late fee summary and all ledger entries for a lease.
 
 ### `POST /api/late-fees/assess`
+
 Manually triggers a late fee assessment pass. Accepts optional `{ "asOfDate": "YYYY-MM-DD" }` in the body.
 
 ## Configuration
 
-| Environment Variable | Default | Description |
-|---|---|---|
-| `LATE_FEE_JOB_ENABLED` | `false` | Set to `true` to start the cron scheduler |
-| `LATE_FEE_CRON` | `0 0 * * *` | Cron expression (default: daily at midnight UTC) |
+| Environment Variable   | Default     | Description                                      |
+| ---------------------- | ----------- | ------------------------------------------------ |
+| `LATE_FEE_JOB_ENABLED` | `false`     | Set to `true` to start the cron scheduler        |
+| `LATE_FEE_CRON`        | `0 0 * * *` | Cron expression (default: daily at midnight UTC) |
 
 ## Running Tests
 

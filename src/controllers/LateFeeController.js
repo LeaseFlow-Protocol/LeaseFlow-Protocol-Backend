@@ -19,7 +19,7 @@ class LateFeeController {
       const data = this.lateFeeService.getLeaseLateFees(leaseId);
       return res.status(200).json({ success: true, data });
     } catch (error) {
-      console.error('[LateFeeController] Error fetching late fees:', error);
+      console.error("[LateFeeController] Error fetching late fees:", error);
       return res.status(500).json({ success: false, error: error.message });
     }
   }
@@ -34,7 +34,7 @@ class LateFeeController {
       const result = this.lateFeeService.assessLateFees({ asOfDate });
       return res.status(200).json({ success: true, data: result });
     } catch (error) {
-      console.error('[LateFeeController] Error assessing late fees:', error);
+      console.error("[LateFeeController] Error assessing late fees:", error);
       return res.status(500).json({ success: false, error: error.message });
     }
   }

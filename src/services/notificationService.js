@@ -22,8 +22,8 @@ class NotificationService {
 
     this.database.insertNotification({
       recipientId: proposal.landlordId,
-      recipientRole: 'landlord',
-      type: 'renewal_proposal_generated',
+      recipientRole: "landlord",
+      type: "renewal_proposal_generated",
       leaseId: proposal.leaseId,
       proposalId: proposal.id,
       message,
@@ -32,8 +32,8 @@ class NotificationService {
 
     this.database.insertNotification({
       recipientId: proposal.tenantId,
-      recipientRole: 'tenant',
-      type: 'renewal_proposal_generated',
+      recipientRole: "tenant",
+      type: "renewal_proposal_generated",
       leaseId: proposal.leaseId,
       proposalId: proposal.id,
       message,
@@ -53,8 +53,8 @@ class NotificationService {
 
     this.database.insertNotification({
       recipientId: lease.tenantId,
-      recipientRole: 'tenant',
-      type: 'late_fee_assessed',
+      recipientRole: "tenant",
+      type: "late_fee_assessed",
       leaseId: lease.id,
       proposalId: payment.id,
       message,
@@ -63,8 +63,8 @@ class NotificationService {
 
     this.database.insertNotification({
       recipientId: lease.landlordId,
-      recipientRole: 'landlord',
-      type: 'late_fee_assessed',
+      recipientRole: "landlord",
+      type: "late_fee_assessed",
       leaseId: lease.id,
       proposalId: payment.id,
       message,

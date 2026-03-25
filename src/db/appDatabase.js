@@ -1,7 +1,7 @@
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const { DatabaseSync } = require('node:sqlite');
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+const { DatabaseSync } = require("node:sqlite");
 
 /**
  * SQLite-backed persistence layer for leases and renewal proposals.
@@ -23,7 +23,7 @@ class AppDatabase {
    * @returns {void}
    */
   ensureDirectory() {
-    if (this.filename === ':memory:') {
+    if (this.filename === ":memory:") {
       return;
     }
 
@@ -181,14 +181,14 @@ class AppDatabase {
    * @returns {T}
    */
   transaction(callback) {
-    this.db.exec('BEGIN');
+    this.db.exec("BEGIN");
 
     try {
       const result = callback();
-      this.db.exec('COMMIT');
+      this.db.exec("COMMIT");
       return result;
     } catch (error) {
-      this.db.exec('ROLLBACK');
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
@@ -396,7 +396,9 @@ class AppDatabase {
         proposal.updatedAt,
         proposal.expiresAt,
         proposal.sorobanContractStatus,
-        proposal.sorobanContractReference ? JSON.stringify(proposal.sorobanContractReference) : null,
+        proposal.sorobanContractReference
+          ? JSON.stringify(proposal.sorobanContractReference)
+          : null,
       );
 
     return this.getRenewalProposalById(id);
@@ -508,7 +510,9 @@ class AppDatabase {
         proposal.rejectedBy || null,
         proposal.updatedAt,
         proposal.sorobanContractStatus,
-        proposal.sorobanContractReference ? JSON.stringify(proposal.sorobanContractReference) : null,
+        proposal.sorobanContractReference
+          ? JSON.stringify(proposal.sorobanContractReference)
+          : null,
         proposal.id,
       );
 
@@ -718,7 +722,7 @@ class AppDatabase {
         payment.amountDue,
         payment.amountPaid || 0,
         payment.datePaid || null,
-        payment.status || 'pending',
+        payment.status || "pending",
         now,
         now,
       );
@@ -801,7 +805,7 @@ class AppDatabase {
         entry.dailyRate,
         entry.feeAmount,
         entry.pendingDebtTotal,
-        entry.sorobanTxStatus || 'pending',
+        entry.sorobanTxStatus || "pending",
         entry.sorobanTxHash || null,
         entry.assessedAt,
         now,
@@ -953,7 +957,6 @@ class AppDatabase {
       )
       .get(leaseId);
     return row ? row.totalDebt : 0;
-  }
   }
 }
 

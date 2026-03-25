@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+const crypto = require("crypto");
 
 /**
  * Service responsible for assessing late fees on overdue rent payments
@@ -37,7 +37,10 @@ class LateFeeService {
           result.skipped += 1;
         }
       } catch (error) {
-        result.errors.push({ leaseId: payment.leaseId, message: error.message });
+        result.errors.push({
+          leaseId: payment.leaseId,
+          message: error.message,
+        });
       }
     }
 
@@ -60,7 +63,9 @@ class LateFeeService {
 
     const dueDate = new Date(`${payment.dueDate}T00:00:00.000Z`);
     const currentDate = new Date(`${asOfDate}T00:00:00.000Z`);
-    const daysLate = Math.floor((currentDate.getTime() - dueDate.getTime()) / 86400000);
+    const daysLate = Math.floor(
+      (currentDate.getTime() - dueDate.getTime()) / 86400000,
+    );
 
     if (daysLate <= 0) {
       return null;
@@ -72,7 +77,11 @@ class LateFeeService {
       return null;
     }
 
-    const feeAmount = calculateFee(daysLate, terms.dailyRate, terms.maxFeePerPeriod);
+    const feeAmount = calculateFee(
+      daysLate,
+      terms.dailyRate,
+      terms.maxFeePerPeriod,
+    );
 
     // Subtract any previously assessed fee to get the incremental amount
     const previousFee = existingEntry ? existingEntry.feeAmount : 0;
@@ -82,7 +91,9 @@ class LateFeeService {
       return null;
     }
 
-    const totalPendingDebt = this.database.getTotalPendingDebtForLease(payment.leaseId) + incrementalFee;
+    const totalPendingDebt =
+      this.database.getTotalPendingDebtForLease(payment.leaseId) +
+      incrementalFee;
 
     const entry = this.database.insertLateFeeEntry({
       leaseId: payment.leaseId,
@@ -103,10 +114,17 @@ class LateFeeService {
         pendingDebt: totalPendingDebt,
         feeEntryId: entry.id,
       });
-      this.database.updateLateFeeEntryTxStatus(entry.id, 'confirmed', txResult.txHash);
+      this.database.updateLateFeeEntryTxStatus(
+        entry.id,
+        "confirmed",
+        txResult.txHash,
+      );
     } catch (error) {
-      console.error(`[LateFeeService] Soroban tx failed for lease ${payment.leaseId}:`, error.message);
-      this.database.updateLateFeeEntryTxStatus(entry.id, 'failed', null);
+      console.error(
+        `[LateFeeService] Soroban tx failed for lease ${payment.leaseId}:`,
+        error.message,
+      );
+      this.database.updateLateFeeEntryTxStatus(entry.id, "failed", null);
     }
 
     // Notify tenant

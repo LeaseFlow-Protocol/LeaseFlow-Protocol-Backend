@@ -1,4 +1,4 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
 
 /**
@@ -44,7 +44,7 @@ function createLateFeeRoutes(controller) {
    *                       items:
    *                         type: object
    */
-  router.get('/:leaseId', (req, res) => controller.getLeaseLateFees(req, res));
+  router.get("/:leaseId", (req, res) => controller.getLeaseLateFees(req, res));
 
   /**
    * @openapi
@@ -82,7 +82,7 @@ function createLateFeeRoutes(controller) {
    *                     errors:
    *                       type: array
    */
-  router.post('/assess', (req, res) => controller.triggerAssessment(req, res));
+  router.post("/assess", (req, res) => controller.triggerAssessment(req, res));
 
   return router;
 }
