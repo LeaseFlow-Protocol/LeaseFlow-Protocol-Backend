@@ -14,7 +14,7 @@ const upload = multer({
  * /api/leases/upload:
  *   post:
  *     summary: Upload a new PDF lease agreement
- *     description: Encrypts the PDF content and stores it on IPFS. Returns the Metadata CID.
+ *     description: Encrypts the PDF content and stores it on IPFS. Returns the Metadata CID. Validates KYC compliance if actor IDs are provided.
  *     tags: [Leases]
  *     requestBody:
  *       required: true
@@ -28,13 +28,50 @@ const upload = multer({
  *                 format: binary
  *               tenantPubKey:
  *                 type: string
+ *                 description: Tenant's public key for encryption
  *               landlordPubKey:
  *                 type: string
+ *                 description: Landlord's public key for encryption
+ *               landlordId:
+ *                 type: string
+ *                 description: Landlord identifier for KYC validation (optional)
+ *               tenantId:
+ *                 type: string
+ *                 description: Tenant identifier for KYC validation (optional)
  *     responses:
  *       201:
  *         description: Lease stored successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                 message:
+ *                   type: string
+ *                 leaseCID:
+ *                   type: string
+ *                 kycVerified:
+ *                   type: boolean
+ *                   nullable: true
  *       400:
  *         description: Missing required fields
+ *       403:
+ *         description: KYC verification required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 error:
+ *                   type: string
+ *                 message:
+ *                   type: string
+ *                 compliance:
+ *                   type: object
+ *                 kycRequired:
+ *                   type: boolean
  */
 router.post('/upload', upload.single('leaseFile'), (req, res) => LeaseController.uploadLease(req, res));
 

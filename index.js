@@ -34,6 +34,7 @@ const { TenantCreditScoreAggregator } = require('./tenantCreditScoreAggregator')
 // Routes
 const leaseRoutes = require('./src/routes/leaseRoutes');
 const ownerRoutes = require('./src/routes/ownerRoutes');
+const kycRoutes = require('./src/routes/kycRoutes');
 
 /**
  * Build authentication middleware for landlords and tenants.
@@ -174,6 +175,7 @@ const port = process.env.PORT || 3000;
   // --- API Routes ---
   app.use('/api/leases', leaseRoutes);
   app.use('/api/owners', ownerRoutes);
+  app.use('/api/kyc', kycRoutes);
 
   // --- Lease Renewal Routes ---
   app.get('/renewal-proposals/:proposalId', requireActorAuth(actorAuthService), (req, res) => {
