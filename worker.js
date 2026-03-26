@@ -8,6 +8,12 @@ const {
 const fs = require('fs');
 const path = require('path');
 
+// --- PATH CORRECTION: Accessing src/ from root ---
+const { loadConfig } = require('./src/config');
+const logger = require('./src/services/loggerService');
+const { pollLeaseEvents } = require('./src/jobs/eventPoller');
+
+const config = loadConfig();
 const DB_PATH = path.join(__dirname, 'leases.json');
 
 // Mock Database Helper
@@ -28,57 +34,78 @@ async function checkAndInitializeLease(leaseId) {
   const lease = leases[leaseId];
 
   if (!lease) {
-    console.error(`Lease ${leaseId} not found.`);
+    logger.error(`Lease ${leaseId} not found.`);
     return;
   }
 
-  // check if both parties have signed
   if (lease.landlord_signed && lease.tenant_signed && !lease.initialized_on_chain) {
-    console.log(`[Worker] Coordination triggered for Lease: ${leaseId}. Both parties signed.`);
+    logger.info(`[Worker] Coordination triggered for Lease: ${leaseId}. Both parties signed.`);
     
     try {
-      console.log(`[Worker] Attempting to initialize on-chain for ${leaseId}...`);
+      logger.info(`[Worker] Attempting to initialize on-chain for ${leaseId}...`);
       await triggerOnChainInitialization(leaseId, lease.contract_data);
       
-      // Update local state
       lease.initialized_on_chain = true;
       lease.status = 'INITIALIZED';
       saveLeases(leases);
       
-      console.log(`[Worker] Lease ${leaseId} successfully initialized on-chain.`);
+      logger.info(`[Worker] Lease ${leaseId} successfully initialized on-chain.`);
     } catch (error) {
-      console.error(`[Worker] CRITICAL FAILURE for lease ${leaseId}:`, error);
+      logger.error(`[Worker] CRITICAL FAILURE for lease ${leaseId}:`, { error: error.message });
     }
   } else {
-    console.log(`[Worker] Lease ${leaseId} still pending signatures or already initialized.`);
+    logger.info(`[Worker] Lease ${leaseId} still pending signatures or already initialized.`);
   }
 }
 
 async function triggerOnChainInitialization(leaseId, data) {
-  const server = new rpc.Server('https://soroban-testnet.stellar.org');
+  const server = new rpc.Server(config.contracts.rpcUrl);
   const networkPassphrase = Networks.TESTNET;
   
-  // Admin key (for demo/simulation, handle dummy values)
   const secretKey = process.env.CONTRACT_ADMIN_SECRET || 'S...';
   
   if (secretKey === 'S...' || secretKey === 'SDP...') {
-    console.log(`[Stellar] Skipping actual transaction building... Simulation mode active.`);
+    logger.info(`[Stellar] Skipping actual transaction building... Simulation mode active.`);
     return new Promise((resolve) => setTimeout(resolve, 100));
   }
 
   const sourceKey = Keypair.fromSecret(secretKey);
-  
-  const contractId = process.env.LEASE_CONTRACT_ID || 'CAEGD57WVTVQSYWYB23AISBW334QO7WNA5XQ56S45GH6BP3D2AVHKUG4';
+  const contractId = config.contracts.defaultContractId;
   const contract = new Contract(contractId);
 
-  // In a real scenario, we'd build and submit the XDR here.
-  // For the purpose of the coordinating worker, we simulate the submission.
-  console.log(`[Stellar] Building transaction for contract ${contractId}...`);
-  console.log(`[Stellar] Calling initialize_lease(${leaseId}, ...)`);
+  logger.info(`[Stellar] Building transaction for contract ${contractId}...`);
+  logger.info(`[Stellar] Calling initialize_lease(${leaseId}, ...)`);
   
-  // Simulation:
   return new Promise((resolve) => setTimeout(resolve, 1000));
 }
+
+/**
+ * --- START: INTERNAL DASHBOARD ENTRY POINT ---
+ * This block starts the Transaction Monitor automatically.
+ */
+(function startBackgroundJobs() {
+  console.log(" LeaseFlow Worker Process Started (Root)");
+
+  // Run the Transaction Monitor (Issue #9)
+  if (config.jobs.renewalJobEnabled) {
+    logger.info(" Transaction Monitor: Active", { 
+        interval: config.jobs.monitorIntervalMs,
+        contract: config.contracts.defaultContractId 
+    });
+
+    // Run immediately on start
+    pollLeaseEvents();
+
+    // Set recurring interval for the monitor
+    setInterval(async () => {
+      try {
+        await pollLeaseEvents();
+      } catch (err) {
+        logger.error("Transaction Monitor Polling Error", { error: err.message });
+      }
+    }, config.jobs.monitorIntervalMs);
+  }
+})();
 
 module.exports = {
   checkAndInitializeLease,
