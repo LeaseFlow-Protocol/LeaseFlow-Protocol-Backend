@@ -1,7 +1,7 @@
-const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
-const { DatabaseSync } = require('node:sqlite');
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+const { DatabaseSync } = require("node:sqlite");
 
 /**
  * SQLite-backed persistence layer for leases and renewal proposals.
@@ -23,7 +23,7 @@ class AppDatabase {
    * @returns {void}
    */
   ensureDirectory() {
-    if (this.filename === ':memory:') {
+    if (this.filename === ":memory:") {
       return;
     }
 
@@ -131,449 +131,50 @@ class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_payment_history_paid_at
         ON payment_history (paid_at);
 
-      CREATE TABLE IF NOT EXISTS kyc_verifications (
+      CREATE TABLE IF NOT EXISTS late_fee_terms (
         id TEXT PRIMARY KEY,
-        actor_id TEXT NOT NULL,
-        actor_role TEXT NOT NULL CHECK (actor_role IN ('landlord', 'tenant')),
-        stellar_account_id TEXT,
-        kyc_status TEXT NOT NULL DEFAULT 'pending' CHECK (kyc_status IN ('pending', 'in_progress', 'verified', 'rejected')),
-        anchor_provider TEXT NOT NULL,
-        verification_reference TEXT,
-        submitted_at TEXT,
-        verified_at TEXT,
-        rejected_at TEXT,
-        rejection_reason TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        UNIQUE(actor_id, actor_role)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_kyc_verifications_actor
-        ON kyc_verifications (actor_id, actor_role);
-
-      CREATE INDEX IF NOT EXISTS idx_kyc_verifications_status
-        ON kyc_verifications (kyc_status);
-
-      CREATE INDEX IF NOT EXISTS idx_kyc_verifications_stellar_account
-        ON kyc_verifications (stellar_account_id);
-
-      -- Sanctions screening tables
-      CREATE TABLE IF NOT EXISTS sanctions_violations (
-        id TEXT PRIMARY KEY,
-        lease_id TEXT NOT NULL,
-        violation_type TEXT NOT NULL,
-        address TEXT NOT NULL,
-        sanctions_source TEXT NOT NULL,
-        sanctions_name TEXT,
-        sanctions_programs TEXT,
-        detected_at TEXT NOT NULL,
-        status TEXT DEFAULT 'ACTIVE',
+        lease_id TEXT NOT NULL UNIQUE,
+        daily_rate INTEGER NOT NULL DEFAULT 1000,
+        grace_period_days INTEGER NOT NULL DEFAULT 5,
+        max_fee_per_period INTEGER,
+        enabled INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS lease_freeze_events (
+      CREATE TABLE IF NOT EXISTS rent_payments (
         id TEXT PRIMARY KEY,
         lease_id TEXT NOT NULL,
-        freeze_reason TEXT NOT NULL,
-        freeze_details TEXT,
-        frozen_at TEXT NOT NULL,
-        unfrozen_at TEXT,
-        status TEXT DEFAULT 'FROZEN',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS sanctions_cache (
-        id TEXT PRIMARY KEY,
-        address TEXT NOT NULL UNIQUE,
-        source TEXT NOT NULL,
-        name TEXT,
-        type TEXT,
-        programs TEXT,
-        regulation TEXT,
-        added_at TEXT NOT NULL,
-        expires_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS payment_schedules (
-        id TEXT PRIMARY KEY,
-        lease_id TEXT NOT NULL,
-        amount TEXT NOT NULL,
-        currency TEXT NOT NULL,
+        period TEXT NOT NULL,
         due_date TEXT NOT NULL,
-        status TEXT DEFAULT 'PENDING',
-        sanctions_paused INTEGER DEFAULT 0,
-        sanctions_pause_reason TEXT,
-        sanctions_paused_at TEXT,
+        amount_due INTEGER NOT NULL,
+        amount_paid INTEGER NOT NULL DEFAULT 0,
+        date_paid TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
 
-      -- Sanctions-related indexes
-      CREATE INDEX IF NOT EXISTS idx_sanctions_violations_lease_id ON sanctions_violations(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_sanctions_violations_address ON sanctions_violations(address);
-      CREATE INDEX IF NOT EXISTS idx_sanctions_violations_status ON sanctions_violations(status);
-      CREATE INDEX IF NOT EXISTS idx_lease_freeze_events_lease_id ON lease_freeze_events(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_sanctions_cache_address ON sanctions_cache(address);
-      CREATE INDEX IF NOT EXISTS idx_sanctions_cache_source ON sanctions_cache(source);
-      CREATE INDEX IF NOT EXISTS idx_sanctions_cache_expires_at ON sanctions_cache(expires_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_rent_payments_lease_period
+      ON rent_payments (lease_id, period);
 
-      -- Vendor management tables (Task 1: Vendor Role)
-      CREATE TABLE IF NOT EXISTS vendors (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        email TEXT NOT NULL UNIQUE,
-        phone TEXT,
-        company_name TEXT,
-        license_number TEXT,
-        specialties TEXT,
-        kyc_status TEXT DEFAULT 'pending' CHECK (kyc_status IN ('pending', 'verified', 'rejected')),
-        stellar_account_id TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS maintenance_tickets (
+      CREATE TABLE IF NOT EXISTS late_fee_ledger (
         id TEXT PRIMARY KEY,
         lease_id TEXT NOT NULL,
-        vendor_id TEXT,
-        landlord_id TEXT NOT NULL,
-        tenant_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL,
-        category TEXT NOT NULL,
-        priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'emergency')),
-        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'resolved', 'closed', 'disputed')),
-        photos TEXT,
-        repair_photos TEXT,
-        notes TEXT,
-        tenant_notes TEXT,
-        opened_at TEXT NOT NULL,
-        in_progress_at TEXT,
-        resolved_at TEXT,
-        closed_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (lease_id) REFERENCES leases(id)
+        rent_payment_id TEXT NOT NULL,
+        period TEXT NOT NULL,
+        days_late INTEGER NOT NULL,
+        daily_rate INTEGER NOT NULL,
+        fee_amount INTEGER NOT NULL,
+        pending_debt_total INTEGER NOT NULL,
+        soroban_tx_status TEXT NOT NULL DEFAULT 'pending',
+        soroban_tx_hash TEXT,
+        assessed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS vendor_access_grants (
-        id TEXT PRIMARY KEY,
-        vendor_id TEXT NOT NULL,
-        lease_id TEXT NOT NULL,
-        maintenance_ticket_id TEXT NOT NULL,
-        granted_by TEXT NOT NULL,
-        access_type TEXT NOT NULL DEFAULT 'maintenance_log' CHECK (access_type IN ('maintenance_log', 'tenant_contact', 'property_access')),
-        permissions TEXT NOT NULL,
-        expires_at TEXT NOT NULL,
-        revoked_at TEXT,
-        revoke_reason TEXT,
-        accessed_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (vendor_id) REFERENCES vendors(id),
-        FOREIGN KEY (lease_id) REFERENCES leases(id),
-        FOREIGN KEY (maintenance_ticket_id) REFERENCES maintenance_tickets(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS vendor_access_logs (
-        id TEXT PRIMARY KEY,
-        access_grant_id TEXT NOT NULL,
-        vendor_id TEXT NOT NULL,
-        lease_id TEXT NOT NULL,
-        action TEXT NOT NULL,
-        resource_accessed TEXT,
-        ip_address TEXT,
-        user_agent TEXT,
-        accessed_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (access_grant_id) REFERENCES vendor_access_grants(id),
-        FOREIGN KEY (vendor_id) REFERENCES vendors(id),
-        FOREIGN KEY (lease_id) REFERENCES leases(id)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_maintenance_tickets_lease_id ON maintenance_tickets(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_maintenance_tickets_vendor_id ON maintenance_tickets(vendor_id);
-      CREATE INDEX IF NOT EXISTS idx_maintenance_tickets_status ON maintenance_tickets(status);
-      CREATE INDEX IF NOT EXISTS idx_vendor_access_grants_vendor_id ON vendor_access_grants(vendor_id);
-      CREATE INDEX IF NOT EXISTS idx_vendor_access_grants_lease_id ON vendor_access_grants(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_vendor_access_grants_expires_at ON vendor_access_grants(expires_at);
-      CREATE INDEX IF NOT EXISTS idx_vendor_access_logs_access_grant_id ON vendor_access_logs(access_grant_id);
-      CREATE INDEX IF NOT EXISTS idx_vendor_access_logs_vendor_id ON vendor_access_logs(vendor_id);
-      CREATE INDEX IF NOT EXISTS idx_vendors_kyc_status ON vendors(kyc_status);
-
-      ALTER TABLE leases ADD COLUMN IF NOT EXISTS has_active_maintenance INTEGER DEFAULT 0;
-
-      -- Smart lock integration tables (Task 2: IoT Smart Lock Gateway)
-      CREATE TABLE IF NOT EXISTS smart_locks (
-        id TEXT PRIMARY KEY,
-        lease_id TEXT NOT NULL,
-        lock_provider TEXT NOT NULL CHECK (lock_provider IN ('august', 'yale', 'schlage', 'other')),
-        device_id TEXT NOT NULL UNIQUE,
-        device_name TEXT,
-        access_token TEXT,
-        refresh_token TEXT,
-        token_expires_at TEXT,
-        pairing_status TEXT DEFAULT 'pending' CHECK (pairing_status IN ('pending', 'paired', 'error', 'unpaired')),
-        last_sync_at TEXT,
-        firmware_version TEXT,
-        battery_level INTEGER,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (lease_id) REFERENCES leases(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS digital_keys (
-        id TEXT PRIMARY KEY,
-        lease_id TEXT NOT NULL,
-        smart_lock_id TEXT NOT NULL,
-        tenant_id TEXT NOT NULL,
-        tenant_account_id TEXT NOT NULL,
-        key_type TEXT NOT NULL DEFAULT 'bluetooth' CHECK (key_type IN ('bluetooth', 'wifi', 'cloud')),
-        key_data TEXT,
-        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'expired')),
-        valid_from TEXT NOT NULL,
-        valid_until TEXT NOT NULL,
-        revoked_at TEXT,
-        revoke_reason TEXT,
-        last_used_at TEXT,
-        usage_count INTEGER DEFAULT 0,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (lease_id) REFERENCES leases(id),
-        FOREIGN KEY (smart_lock_id) REFERENCES smart_locks(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS key_usage_logs (
-        id TEXT PRIMARY KEY,
-        digital_key_id TEXT NOT NULL,
-        smart_lock_id TEXT NOT NULL,
-        lease_id TEXT NOT NULL,
-        tenant_id TEXT NOT NULL,
-        action TEXT NOT NULL CHECK (action IN ('unlock', 'lock', 'access_granted', 'access_denied', 'key_revoked')),
-        result TEXT NOT NULL CHECK (result IN ('success', 'failure', 'denied')),
-        failure_reason TEXT,
-        ip_address TEXT,
-        location_data TEXT,
-        metadata TEXT,
-        performed_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (digital_key_id) REFERENCES digital_keys(id),
-        FOREIGN KEY (smart_lock_id) REFERENCES smart_locks(id),
-        FOREIGN KEY (lease_id) REFERENCES leases(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS lease_enforcement_checks (
-        id TEXT PRIMARY KEY,
-        lease_id TEXT NOT NULL,
-        check_type TEXT NOT NULL CHECK (check_type IN ('rent_payment', 'lease_active', 'lease_expired', 'breach_detected')),
-        soroban_contract_status TEXT,
-        rent_current INTEGER,
-        enforcement_action TEXT,
-        check_result TEXT NOT NULL CHECK (check_result IN ('pass', 'fail', 'warning')),
-        details TEXT,
-        checked_at TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (lease_id) REFERENCES leases(id)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_smart_locks_lease_id ON smart_locks(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_smart_locks_device_id ON smart_locks(device_id);
-      CREATE INDEX IF NOT EXISTS idx_digital_keys_lease_id ON digital_keys(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_digital_keys_tenant_id ON digital_keys(tenant_id);
-      CREATE INDEX IF NOT EXISTS idx_digital_keys_status ON digital_keys(status);
-      CREATE INDEX IF NOT EXISTS idx_digital_keys_valid_until ON digital_keys(valid_until);
-      CREATE INDEX IF NOT EXISTS idx_key_usage_logs_digital_key_id ON key_usage_logs(digital_key_id);
-      CREATE INDEX IF NOT EXISTS idx_key_usage_logs_smart_lock_id ON key_usage_logs(smart_lock_id);
-      CREATE INDEX IF NOT EXISTS idx_lease_enforcement_checks_lease_id ON lease_enforcement_checks(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_lease_enforcement_checks_checked_at ON lease_enforcement_checks(checked_at);
-
-      -- Rent escrow tables (Task 3: Maintenance Dispute Escrow)
-      CREATE TABLE IF NOT EXISTS rent_escrows (
-        id TEXT PRIMARY KEY,
-        lease_id TEXT NOT NULL,
-        maintenance_ticket_id TEXT NOT NULL,
-        tenant_id TEXT NOT NULL,
-        landlord_id TEXT NOT NULL,
-        disputed_amount TEXT NOT NULL,
-        currency TEXT NOT NULL DEFAULT 'XLM',
-        escrow_status TEXT NOT NULL DEFAULT 'active' CHECK (escrow_status IN ('active', 'released_to_landlord', 'returned_to_tenant', 'split', 'cancelled')),
-        escrow_account_id TEXT,
-        reason TEXT NOT NULL,
-        evidence TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (lease_id) REFERENCES leases(id),
-        FOREIGN KEY (maintenance_ticket_id) REFERENCES maintenance_tickets(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS escrow_transactions (
-        id TEXT PRIMARY KEY,
-        escrow_id TEXT NOT NULL,
-        transaction_type TEXT NOT NULL CHECK (transaction_type IN ('deposit', 'release', 'return', 'split', 'refund')),
-        amount TEXT NOT NULL,
-        currency TEXT NOT NULL,
-        transaction_hash TEXT,
-        stellar_operation_id TEXT,
-        recipient_id TEXT,
-        recipient_account_id TEXT,
-        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
-        failure_reason TEXT,
-        metadata TEXT,
-        processed_at TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (escrow_id) REFERENCES rent_escrows(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS repair_verifications (
-        id TEXT PRIMARY KEY,
-        maintenance_ticket_id TEXT NOT NULL,
-        escrow_id TEXT,
-        repair_photos_before TEXT,
-        repair_photos_after TEXT,
-        repair_description TEXT,
-        tenant_confirmation_status TEXT DEFAULT 'pending' CHECK (tenant_confirmation_status IN ('pending', 'confirmed', 'rejected', 'timeout')),
-        tenant_feedback TEXT,
-        tenant_confirmed_at TEXT,
-        tenant_rejected_at TEXT,
-        auto_release_triggered INTEGER DEFAULT 0,
-        verifier_notes TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (maintenance_ticket_id) REFERENCES maintenance_tickets(id),
-        FOREIGN KEY (escrow_id) REFERENCES rent_escrows(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS escrow_release_rules (
-        id TEXT PRIMARY KEY,
-        lease_id TEXT,
-        rule_type TEXT NOT NULL CHECK (rule_type IN ('auto_release_days', 'require_verification', 'split_percentage')),
-        rule_value TEXT NOT NULL,
-        enabled INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (lease_id) REFERENCES leases(id)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_rent_escrows_lease_id ON rent_escrows(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_rent_escrows_maintenance_ticket_id ON rent_escrows(maintenance_ticket_id);
-      CREATE INDEX IF NOT EXISTS idx_rent_escrows_status ON rent_escrows(escrow_status);
-      CREATE INDEX IF NOT EXISTS idx_escrow_transactions_escrow_id ON escrow_transactions(escrow_id);
-      CREATE INDEX IF NOT EXISTS idx_escrow_transactions_status ON escrow_transactions(status);
-      CREATE INDEX IF NOT EXISTS idx_repair_verifications_maintenance_ticket_id ON repair_verifications(maintenance_ticket_id);
-      CREATE INDEX IF NOT EXISTS idx_repair_verifications_tenant_status ON repair_verifications(tenant_confirmation_status);
-      CREATE INDEX IF NOT EXISTS idx_escrow_release_rules_lease_id ON escrow_release_rules(lease_id);
-
-      -- IoT utility monitoring tables (Task 4: Utility Monitoring Analytics)
-      CREATE TABLE IF NOT EXISTS utility_meters (
-        id TEXT PRIMARY KEY,
-        lease_id TEXT NOT NULL,
-        meter_type TEXT NOT NULL CHECK (meter_type IN ('water', 'electricity', 'gas', 'internet', 'other')),
-        meter_id TEXT NOT NULL UNIQUE,
-        meter_name TEXT,
-        provider TEXT,
-        unit_of_measurement TEXT NOT NULL DEFAULT 'units',
-        location_description TEXT,
-        installation_date TEXT,
-        last_reading_date TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (lease_id) REFERENCES leases(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS meter_readings (
-        id TEXT PRIMARY KEY,
-        utility_meter_id TEXT NOT NULL,
-        lease_id TEXT NOT NULL,
-        reading_value REAL NOT NULL,
-        consumption_value REAL,
-        reading_timestamp TEXT NOT NULL,
-        reading_source TEXT NOT NULL CHECK (reading_source IN ('iot_auto', 'manual_entry', 'estimated')),
-        quality_score REAL,
-        is_anomaly INTEGER DEFAULT 0,
-        anomaly_reason TEXT,
-        metadata TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id),
-        FOREIGN KEY (lease_id) REFERENCES leases(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS utility_alerts (
-        id TEXT PRIMARY KEY,
-        utility_meter_id TEXT NOT NULL,
-        lease_id TEXT NOT NULL,
-        alert_type TEXT NOT NULL CHECK (alert_type IN ('high_consumption', 'leak_detected', 'no_data', 'meter_offline', 'spike_detected')),
-        severity TEXT NOT NULL DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high', 'critical')),
-        title TEXT NOT NULL,
-        description TEXT NOT NULL,
-        trigger_value REAL,
-        threshold_value REAL,
-        standard_deviations REAL,
-        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'acknowledged', 'resolved', 'false_positive')),
-        acknowledged_by TEXT,
-        acknowledged_at TEXT,
-        resolved_by TEXT,
-        resolved_at TEXT,
-        resolution_notes TEXT,
-        notifications_sent TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id),
-        FOREIGN KEY (lease_id) REFERENCES leases(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS consumption_baselines (
-        id TEXT PRIMARY KEY,
-        utility_meter_id TEXT NOT NULL,
-        lease_id TEXT NOT NULL,
-        baseline_period TEXT NOT NULL CHECK (baseline_period IN ('daily', 'weekly', 'monthly', 'seasonal')),
-        avg_consumption REAL NOT NULL,
-        std_deviation REAL NOT NULL,
-        min_consumption REAL,
-        max_consumption REAL,
-        sample_size INTEGER,
-        calculation_method TEXT DEFAULT 'rolling_average',
-        last_calculated_at TEXT NOT NULL,
-        valid_from TEXT NOT NULL,
-        valid_until TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id),
-        FOREIGN KEY (lease_id) REFERENCES leases(id)
-      );
-
-      CREATE TABLE IF NOT EXISTS alert_rules (
-        id TEXT PRIMARY KEY,
-        lease_id TEXT,
-        utility_meter_id TEXT,
-        rule_type TEXT NOT NULL CHECK (rule_type IN ('std_deviation_threshold', 'absolute_threshold', 'percentage_change', 'no_data_timeout')),
-        rule_config TEXT NOT NULL,
-        enabled INTEGER NOT NULL DEFAULT 1,
-        notification_channels TEXT,
-        notify_tenant INTEGER DEFAULT 1,
-        notify_landlord INTEGER DEFAULT 1,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY (lease_id) REFERENCES leases(id),
-        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_utility_meters_lease_id ON utility_meters(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_utility_meters_meter_type ON utility_meters(meter_type);
-      CREATE INDEX IF NOT EXISTS idx_meter_readings_meter_id ON meter_readings(utility_meter_id);
-      CREATE INDEX IF NOT EXISTS idx_meter_readings_lease_id ON meter_readings(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_meter_readings_timestamp ON meter_readings(reading_timestamp DESC);
-      CREATE INDEX IF NOT EXISTS idx_meter_readings_is_anomaly ON meter_readings(is_anomaly);
-      CREATE INDEX IF NOT EXISTS idx_utility_alerts_meter_id ON utility_alerts(utility_meter_id);
-      CREATE INDEX IF NOT EXISTS idx_utility_alerts_lease_id ON utility_alerts(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_utility_alerts_status ON utility_alerts(status);
-      CREATE INDEX IF NOT EXISTS idx_utility_alerts_created_at ON utility_alerts(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_consumption_baselines_meter_id ON consumption_baselines(utility_meter_id);
-      CREATE INDEX IF NOT EXISTS idx_alert_rules_lease_id ON alert_rules(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_alert_rules_meter_id ON alert_rules(utility_meter_id);
+      CREATE INDEX IF NOT EXISTS idx_late_fee_ledger_lease
+      ON late_fee_ledger (lease_id);
     `);
   }
 
@@ -585,14 +186,14 @@ class AppDatabase {
    * @returns {T}
    */
   transaction(callback) {
-    this.db.exec('BEGIN');
+    this.db.exec("BEGIN");
 
     try {
       const result = callback();
-      this.db.exec('COMMIT');
+      this.db.exec("COMMIT");
       return result;
     } catch (error) {
-      this.db.exec('ROLLBACK');
+      this.db.exec("ROLLBACK");
       throw error;
     }
   }
@@ -800,7 +401,9 @@ class AppDatabase {
         proposal.updatedAt,
         proposal.expiresAt,
         proposal.sorobanContractStatus,
-        proposal.sorobanContractReference ? JSON.stringify(proposal.sorobanContractReference) : null,
+        proposal.sorobanContractReference
+          ? JSON.stringify(proposal.sorobanContractReference)
+          : null,
       );
 
     return this.getRenewalProposalById(id);
@@ -912,7 +515,9 @@ class AppDatabase {
         proposal.rejectedBy || null,
         proposal.updatedAt,
         proposal.sorobanContractStatus,
-        proposal.sorobanContractReference ? JSON.stringify(proposal.sorobanContractReference) : null,
+        proposal.sorobanContractReference
+          ? JSON.stringify(proposal.sorobanContractReference)
+          : null,
         proposal.id,
       );
 
@@ -1001,7 +606,7 @@ class AppDatabase {
         payment.leaseId ?? null,
         payment.tenantAccountId,
         String(payment.amount),
-        payment.assetCode || 'XLM',
+        payment.assetCode || "XLM",
         payment.assetIssuer ?? null,
         payment.transactionHash,
         payment.paidAt,
@@ -1061,6 +666,197 @@ class AppDatabase {
          FROM payment_history
          WHERE lease_id = ?
          ORDER BY paid_at DESC`,
+      )
+      .all(leaseId);
+  }
+
+  // --- Late Fee Terms ---
+
+  seedLateFeeTerms(terms) {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO late_fee_terms (id, lease_id, daily_rate, grace_period_days, max_fee_per_period, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(lease_id) DO UPDATE SET
+           daily_rate = excluded.daily_rate,
+           grace_period_days = excluded.grace_period_days,
+           max_fee_per_period = excluded.max_fee_per_period,
+           enabled = excluded.enabled,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        terms.id || crypto.randomUUID(),
+        terms.leaseId,
+        terms.dailyRate,
+        terms.gracePeriodDays,
+        terms.maxFeePerPeriod ?? null,
+        terms.enabled === false ? 0 : 1,
+        now,
+        now,
+      );
+  }
+
+  getLateFeeTermsByLeaseId(leaseId) {
+    const row = this.db
+      .prepare(
+        `SELECT id, lease_id AS leaseId, daily_rate AS dailyRate,
+                grace_period_days AS gracePeriodDays, max_fee_per_period AS maxFeePerPeriod,
+                enabled, created_at AS createdAt, updated_at AS updatedAt
+         FROM late_fee_terms WHERE lease_id = ?`,
+      )
+      .get(leaseId);
+    return row ? { ...row, enabled: Boolean(row.enabled) } : null;
+  }
+
+  // --- Rent Payments ---
+
+  insertRentPayment(payment) {
+    const id = payment.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO rent_payments (id, lease_id, period, due_date, amount_due, amount_paid, date_paid, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        payment.leaseId,
+        payment.period,
+        payment.dueDate,
+        payment.amountDue,
+        payment.amountPaid || 0,
+        payment.datePaid || null,
+        payment.status || "pending",
+        now,
+        now,
+      );
+    return this.getRentPaymentById(id);
+  }
+
+  getRentPaymentById(paymentId) {
+    const row = this.db
+      .prepare(
+        `SELECT id, lease_id AS leaseId, period, due_date AS dueDate,
+                amount_due AS amountDue, amount_paid AS amountPaid,
+                date_paid AS datePaid, status,
+                created_at AS createdAt, updated_at AS updatedAt
+         FROM rent_payments WHERE id = ?`,
+      )
+      .get(paymentId);
+    return row || null;
+  }
+
+  getRentPaymentByLeasePeriod(leaseId, period) {
+    const row = this.db
+      .prepare(
+        `SELECT id, lease_id AS leaseId, period, due_date AS dueDate,
+                amount_due AS amountDue, amount_paid AS amountPaid,
+                date_paid AS datePaid, status,
+                created_at AS createdAt, updated_at AS updatedAt
+         FROM rent_payments WHERE lease_id = ? AND period = ?`,
+      )
+      .get(leaseId, period);
+    return row || null;
+  }
+
+  listOverdueRentPayments(asOfDate) {
+    return this.db
+      .prepare(
+        `SELECT rp.id, rp.lease_id AS leaseId, rp.period, rp.due_date AS dueDate,
+                rp.amount_due AS amountDue, rp.amount_paid AS amountPaid,
+                rp.date_paid AS datePaid, rp.status,
+                rp.created_at AS createdAt, rp.updated_at AS updatedAt
+         FROM rent_payments rp
+         JOIN leases l ON l.id = rp.lease_id
+         WHERE rp.status = 'pending' AND rp.due_date < ? AND l.status = 'active'
+         ORDER BY rp.due_date ASC`,
+      )
+      .all(asOfDate);
+  }
+
+  updateRentPaymentStatus(paymentId, updates) {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE rent_payments SET amount_paid = ?, date_paid = ?, status = ?, updated_at = ? WHERE id = ?`,
+      )
+      .run(
+        updates.amountPaid,
+        updates.datePaid || null,
+        updates.status,
+        now,
+        paymentId,
+      );
+    return this.getRentPaymentById(paymentId);
+  }
+
+  // --- Late Fee Ledger ---
+
+  insertLateFeeEntry(entry) {
+    const id = entry.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO late_fee_ledger (id, lease_id, rent_payment_id, period, days_late, daily_rate, fee_amount, pending_debt_total, soroban_tx_status, soroban_tx_hash, assessed_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        entry.leaseId,
+        entry.rentPaymentId,
+        entry.period,
+        entry.daysLate,
+        entry.dailyRate,
+        entry.feeAmount,
+        entry.pendingDebtTotal,
+        entry.sorobanTxStatus || "pending",
+        entry.sorobanTxHash || null,
+        entry.assessedAt,
+        now,
+      );
+    return this.getLateFeeEntryById(id);
+  }
+
+  getLateFeeEntryById(entryId) {
+    const row = this.db
+      .prepare(
+        `SELECT id, lease_id AS leaseId, rent_payment_id AS rentPaymentId, period,
+                days_late AS daysLate, daily_rate AS dailyRate, fee_amount AS feeAmount,
+                pending_debt_total AS pendingDebtTotal, soroban_tx_status AS sorobanTxStatus,
+                soroban_tx_hash AS sorobanTxHash, assessed_at AS assessedAt,
+                created_at AS createdAt
+         FROM late_fee_ledger WHERE id = ?`,
+      )
+      .get(entryId);
+    return row || null;
+  }
+
+  getLatestLateFeeForPayment(rentPaymentId) {
+    const row = this.db
+      .prepare(
+        `SELECT id, lease_id AS leaseId, rent_payment_id AS rentPaymentId, period,
+                days_late AS daysLate, daily_rate AS dailyRate, fee_amount AS feeAmount,
+                pending_debt_total AS pendingDebtTotal, soroban_tx_status AS sorobanTxStatus,
+                soroban_tx_hash AS sorobanTxHash, assessed_at AS assessedAt,
+                created_at AS createdAt
+         FROM late_fee_ledger WHERE rent_payment_id = ?
+         ORDER BY assessed_at DESC LIMIT 1`,
+      )
+      .get(rentPaymentId);
+    return row || null;
+  }
+
+  listLateFeesByLeaseId(leaseId) {
+    return this.db
+      .prepare(
+        `SELECT id, lease_id AS leaseId, rent_payment_id AS rentPaymentId, period,
+                days_late AS daysLate, daily_rate AS dailyRate, fee_amount AS feeAmount,
+                pending_debt_total AS pendingDebtTotal, soroban_tx_status AS sorobanTxStatus,
+                soroban_tx_hash AS sorobanTxHash, assessed_at AS assessedAt,
+                created_at AS createdAt
+         FROM late_fee_ledger WHERE lease_id = ?
+         ORDER BY assessed_at DESC`,
       )
       .all(leaseId);
   }
@@ -1149,457 +945,23 @@ class AppDatabase {
     return row ? normalizeLeaseRow(row) : null;
   }
 
-  // ---------------------------------------------------------------------------
-  // KYC Verification methods (SEP-12 Stellar Anchor Integration)
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Insert or update a KYC verification record.
-   *
-   * @param {object} kycData KYC verification data.
-   * @returns {object} The inserted/updated KYC record.
-   */
-  upsertKycVerification(kycData) {
-    const now = new Date().toISOString();
-    const id = kycData.id || crypto.randomUUID();
-    
+  updateLateFeeEntryTxStatus(entryId, txStatus, txHash) {
     this.db
       .prepare(
-        `INSERT INTO kyc_verifications (
-           id, actor_id, actor_role, stellar_account_id, kyc_status, anchor_provider,
-           verification_reference, submitted_at, verified_at, rejected_at, rejection_reason,
-           created_at, updated_at
-         )
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(actor_id, actor_role) DO UPDATE SET
-           stellar_account_id = excluded.stellar_account_id,
-           kyc_status = excluded.kyc_status,
-           anchor_provider = excluded.anchor_provider,
-           verification_reference = excluded.verification_reference,
-           submitted_at = excluded.submitted_at,
-           verified_at = excluded.verified_at,
-           rejected_at = excluded.rejected_at,
-           rejection_reason = excluded.rejection_reason,
-           updated_at = excluded.updated_at`,
+        `UPDATE late_fee_ledger SET soroban_tx_status = ?, soroban_tx_hash = ? WHERE id = ?`,
       )
-      .run(
-        id,
-        kycData.actorId,
-        kycData.actorRole,
-        kycData.stellarAccountId || null,
-        kycData.kycStatus || 'pending',
-        kycData.anchorProvider,
-        kycData.verificationReference || null,
-        kycData.submittedAt || null,
-        kycData.verifiedAt || null,
-        kycData.rejectedAt || null,
-        kycData.rejectionReason || null,
-        kycData.createdAt || now,
-        now,
-      );
-
-    return this.getKycVerificationByActor(kycData.actorId, kycData.actorRole);
+      .run(txStatus, txHash || null, entryId);
+    return this.getLateFeeEntryById(entryId);
   }
 
-  /**
-   * Fetch a KYC verification record by actor.
-   *
-   * @param {string} actorId Actor identifier.
-   * @param {string} actorRole Actor role ('landlord' or 'tenant').
-   * @returns {object|null}
-   */
-  getKycVerificationByActor(actorId, actorRole) {
+  getTotalPendingDebtForLease(leaseId) {
     const row = this.db
       .prepare(
-        `SELECT
-           id,
-           actor_id AS actorId,
-           actor_role AS actorRole,
-           stellar_account_id AS stellarAccountId,
-           kyc_status AS kycStatus,
-           anchor_provider AS anchorProvider,
-           verification_reference AS verificationReference,
-           submitted_at AS submittedAt,
-           verified_at AS verifiedAt,
-           rejected_at AS rejectedAt,
-           rejection_reason AS rejectionReason,
-           created_at AS createdAt,
-           updated_at AS updatedAt
-         FROM kyc_verifications
-         WHERE actor_id = ? AND actor_role = ?`,
+        `SELECT COALESCE(SUM(fee_amount), 0) AS totalDebt
+         FROM late_fee_ledger WHERE lease_id = ?`,
       )
-      .get(actorId, actorRole);
-
-    return row ? normalizeKycRow(row) : null;
-  }
-
-  /**
-   * Fetch a KYC verification record by Stellar account.
-   *
-   * @param {string} stellarAccountId Stellar account address.
-   * @returns {object|null}
-   */
-  getKycVerificationByStellarAccount(stellarAccountId) {
-    const row = this.db
-      .prepare(
-        `SELECT
-           id,
-           actor_id AS actorId,
-           actor_role AS actorRole,
-           stellar_account_id AS stellarAccountId,
-           kyc_status AS kycStatus,
-           anchor_provider AS anchorProvider,
-           verification_reference AS verificationReference,
-           submitted_at AS submittedAt,
-           verified_at AS verifiedAt,
-           rejected_at AS rejectedAt,
-           rejection_reason AS rejectionReason,
-           created_at AS createdAt,
-           updated_at AS updatedAt
-         FROM kyc_verifications
-         WHERE stellar_account_id = ?`,
-      )
-      .get(stellarAccountId);
-
-    return row ? normalizeKycRow(row) : null;
-  }
-
-  /**
-   * Update KYC verification status.
-   *
-   * @param {string} actorId Actor identifier.
-   * @param {string} actorRole Actor role.
-   * @param {string} newStatus New KYC status.
-   * @param {object} additionalFields Additional fields to update.
-   * @returns {object|null}
-   */
-  updateKycStatus(actorId, actorRole, newStatus, additionalFields = {}) {
-    const now = new Date().toISOString();
-    const updateFields = {
-      kyc_status: newStatus,
-      updated_at: now,
-      ...additionalFields
-    };
-
-    const setClause = Object.keys(updateFields).map(key => `${key} = ?`).join(', ');
-    const values = Object.values(updateFields);
-
-    this.db
-      .prepare(
-        `UPDATE kyc_verifications
-         SET ${setClause}
-         WHERE actor_id = ? AND actor_role = ?`,
-      )
-      .run(...values, actorId, actorRole);
-
-    return this.getKycVerificationByActor(actorId, actorRole);
-  }
-
-  /**
-   * Check if both landlord and tenant are verified for a lease.
-   *
-   * @param {string} landlordId Landlord identifier.
-   * @param {string} tenantId Tenant identifier.
-   * @returns {object} Verification status for both parties.
-   */
-  checkLeaseKycCompliance(landlordId, tenantId) {
-    const landlordKyc = this.getKycVerificationByActor(landlordId, 'landlord');
-    const tenantKyc = this.getKycVerificationByActor(tenantId, 'tenant');
-
-    return {
-      landlord: {
-        id: landlordId,
-        isVerified: landlordKyc?.kycStatus === 'verified',
-        kycStatus: landlordKyc?.kycStatus || 'not_started',
-        verification: landlordKyc
-      },
-      tenant: {
-        id: tenantId,
-        isVerified: tenantKyc?.kycStatus === 'verified',
-        kycStatus: tenantKyc?.kycStatus || 'not_started',
-        verification: tenantKyc
-      },
-      leaseCanProceed: (landlordKyc?.kycStatus === 'verified' && tenantKyc?.kycStatus === 'verified')
-    };
-  }
-/**
-   * Get active leases for sanctions screening
-   * @returns {Array} Array of active lease objects
-   */
-  getActiveLeases() {
-    const stmt = this.db.prepare(`
-      SELECT 
-        id,
-        landlord_id as landlordId,
-        tenant_id as tenantId,
-        landlord_stellar_address as landlordStellarAddress,
-        tenant_stellar_address as tenantStellarAddress,
-        status,
-        rent_amount as rentAmount,
-        currency,
-        start_date as startDate,
-        end_date as endDate,
-        created_at as createdAt
-      FROM leases 
-      WHERE status IN ('ACTIVE', 'PENDING') 
-      AND (landlord_stellar_address IS NOT NULL OR tenant_stellar_address IS NOT NULL)
-      ORDER BY created_at DESC
-    `);
-    
-    return stmt.all().map(normalizeLeaseRow);
-  }
-
-  /**
-   * Update lease status due to sanctions violation
-   * @param {string} leaseId - Lease ID
-   * @param {string} status - New status (e.g., 'FROZEN')
-   * @param {Object} metadata - Additional metadata
-   * @returns {boolean} Success status
-   */
-  updateLeaseStatus(leaseId, status, metadata = {}) {
-    const stmt = this.db.prepare(`
-      UPDATE leases 
-      SET status = ?,
-          sanctions_status = ?,
-          sanctions_check_at = ?,
-          sanctions_violation_count = sanctions_violation_count + 1,
-          updated_at = ?
-      WHERE id = ?
-    `);
-
-    const result = stmt.run(
-      status,
-      status === 'FROZEN' ? 'VIOLATION' : 'CLEAN',
-      new Date().toISOString(),
-      new Date().toISOString(),
-      leaseId
-    );
-
-    return result.changes > 0;
-  }
-
-  /**
-   * Pause payment schedules for a lease
-   * @param {string} leaseId - Lease ID
-   * @param {Object} pauseDetails - Pause details
-   * @returns {boolean} Success status
-   */
-  pausePaymentSchedules(leaseId, pauseDetails) {
-    const stmt = this.db.prepare(`
-      UPDATE payment_schedules 
-      SET sanctions_paused = TRUE,
-          sanctions_pause_reason = ?,
-          sanctions_paused_at = ?,
-          updated_at = ?
-      WHERE lease_id = ? AND status = 'ACTIVE'
-    `);
-
-    const result = stmt.run(
-      pauseDetails.reason,
-      pauseDetails.pausedAt,
-      new Date().toISOString(),
-      leaseId
-    );
-
-    return result.changes > 0;
-  }
-
-  /**
-   * Log sanctions violation
-   * @param {Object} violationData - Violation data
-   * @returns {boolean} Success status
-   */
-  logSanctionsViolation(violationData) {
-    const stmt = this.db.prepare(`
-      INSERT INTO sanctions_violations (
-        lease_id,
-        violation_type,
-        address,
-        sanctions_source,
-        sanctions_name,
-        sanctions_programs,
-        detected_at,
-        status
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    try {
-      stmt.run(
-        violationData.leaseId,
-        violationData.violations[0]?.type || 'UNKNOWN',
-        violationData.violations[0]?.address || '',
-        violationData.violations[0]?.source || 'UNKNOWN',
-        violationData.violations[0]?.name || '',
-        JSON.stringify(violationData.violations[0]?.programs || []),
-        violationData.detectedAt,
-        'ACTIVE'
-      );
-      return true;
-    } catch (error) {
-      console.error('Failed to log sanctions violation:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Get sanctions violations for a lease
-   * @param {string} leaseId - Lease ID
-   * @returns {Array} Array of violation objects
-   */
-  getSanctionsViolations(leaseId) {
-    const stmt = this.db.prepare(`
-      SELECT 
-        id,
-        lease_id as leaseId,
-        violation_type as violationType,
-        address,
-        sanctions_source as sanctionsSource,
-        sanctions_name as sanctionsName,
-        sanctions_programs as sanctionsPrograms,
-        detected_at as detectedAt,
-        status,
-        created_at as createdAt,
-        updated_at as updatedAt
-      FROM sanctions_violations 
-      WHERE lease_id = ?
-      ORDER BY detected_at DESC
-    `);
-
-    const rows = stmt.all(leaseId);
-    return rows.map(row => ({
-      ...row,
-      sanctionsPrograms: JSON.parse(row.sanctionsPrograms || '[]')
-    }));
-  }
-
-  /**
-   * Cache sanctions list entries
-   * @param {Array} sanctionsData - Array of sanctions entries
-   * @returns {boolean} Success status
-   */
-  cacheSanctionsList(sanctionsData) {
-    const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO sanctions_cache (
-        address,
-        source,
-        name,
-        type,
-        programs,
-        regulation,
-        added_at,
-        expires_at,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const transaction = this.db.transaction(() => {
-      for (const entry of sanctionsData) {
-        stmt.run(
-          entry.address,
-          entry.source,
-          entry.name,
-          entry.type,
-          JSON.stringify(entry.programs || []),
-          entry.regulation || null,
-          entry.addedAt,
-          entry.expiresAt || new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(), // 6 hours
-          new Date().toISOString(),
-          new Date().toISOString()
-        );
-      }
-    });
-
-    try {
-      transaction();
-      return true;
-    } catch (error) {
-      console.error('Failed to cache sanctions list:', error);
-      return false;
-    }
-  }
-
-  /**
-   * Get cached sanctions entry for an address
-   * @param {string} address - Stellar address
-   * @returns {Object|null} Sanctions entry or null
-   */
-  getCachedSanctionsEntry(address) {
-    const stmt = this.db.prepare(`
-      SELECT 
-        address,
-        source,
-        name,
-        type,
-        programs,
-        regulation,
-        added_at as addedAt,
-        expires_at as expiresAt
-      FROM sanctions_cache 
-      WHERE address = ? AND expires_at > ?
-    `);
-
-    const row = stmt.get(address.toUpperCase(), new Date().toISOString());
-    
-    if (row) {
-      return {
-        ...row,
-        programs: JSON.parse(row.programs || '[]')
-      };
-    }
-    
-    return null;
-  }
-
-  /**
-   * Clean expired sanctions cache entries
-   * @returns {number} Number of entries cleaned
-   */
-  cleanExpiredSanctionsCache() {
-    const stmt = this.db.prepare(`
-      DELETE FROM sanctions_cache 
-      WHERE expires_at <= ?
-    `);
-
-    const result = stmt.run(new Date().toISOString());
-    return result.changes;
-  }
-
-  /**
-   * Get sanctions screening statistics
-   * @returns {Object} Statistics object
-   */
-  getSanctionsStatistics() {
-    const stats = {};
-
-    // Total violations
-    const totalViolationsStmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM sanctions_violations WHERE status = 'ACTIVE'
-    `);
-    stats.totalActiveViolations = totalViolationsStmt.get().count;
-
-    // Frozen leases
-    const frozenLeasesStmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM leases WHERE status = 'FROZEN'
-    `);
-    stats.frozenLeases = frozenLeasesStmt.get().count;
-
-    // Cache size
-    const cacheSizeStmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM sanctions_cache WHERE expires_at > ?
-    `);
-    stats.cacheSize = cacheSizeStmt.get(new Date().toISOString()).count;
-
-    // Violations by source
-    const violationsBySourceStmt = this.db.prepare(`
-      SELECT sanctions_source, COUNT(*) as count 
-      FROM sanctions_violations 
-      WHERE status = 'ACTIVE' 
-      GROUP BY sanctions_source
-    `);
-    stats.violationsBySource = violationsBySourceStmt.all();
-
-    return stats;
+      .get(leaseId);
+    return row ? row.totalDebt : 0;
   }
 }
 

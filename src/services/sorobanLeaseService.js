@@ -1,4 +1,4 @@
-const crypto = require('crypto');
+const crypto = require("crypto");
 
 /**
  * Soroban renewal contract preparation service.
@@ -21,6 +21,26 @@ class SorobanLeaseService {
       leaseId: input.proposal.leaseId,
       preparedAt: new Date().toISOString(),
       terms: input.proposal.proposedTerms,
+    };
+  }
+
+  /**
+   * Submit a pending_debt update to the Soroban lease contract.
+   *
+   * This implementation prepares and simulates the transaction without
+   * requiring a live network. Production integrations should replace this
+   * with a real Soroban contract invocation.
+   *
+   * @param {{leaseId: string, tenantId: string, pendingDebt: number, feeEntryId: string}} input
+   * @returns {{txHash: string, leaseId: string, pendingDebt: number, updatedAt: string}}
+   */
+  updatePendingDebt(input) {
+    const txHash = `tx_debt_${crypto.randomUUID()}`;
+    return {
+      txHash,
+      leaseId: input.leaseId,
+      pendingDebt: input.pendingDebt,
+      updatedAt: new Date().toISOString(),
     };
   }
 }
