@@ -1,71 +1,132 @@
-'use strict';
-
-const express = require('express');
 const request = require('supertest');
-const { AppDatabase } = require('../src/db/appDatabase');
-const { createPaymentRoutes } = require('../src/routes/paymentRoutes');
 
-describe('Utility Billing Reconciliation (Issue #14)', () => {
-  let db;
+jest.mock('../src/routes/sanctionsRoutes', () => {
+  const express = require('express');
+  return express.Router();
+});
+
+jest.mock('../src/routes/evictionNoticeRoutes', () => {
+  const express = require('express');
+  return express.Router();
+});
+
+const { createApp } = require('../index');
+const { loadConfig } = require('../src/config');
+const { AppDatabase } = require('../src/db/appDatabase');
+
+describe('Variable utility billing reconciliation', () => {
   let app;
+  let database;
 
   beforeEach(() => {
-    db = new AppDatabase(':memory:');
-    db.seedLease({
-      id: 'lease-utility-1',
+    const config = loadConfig({
+      NODE_ENV: 'test',
+      DATABASE_FILENAME: ':memory:',
+      AUTH_JWT_SECRET: 'leaseflow-test-secret',
+    });
+
+    database = new AppDatabase(':memory:');
+    database.seedLease({
+      id: 'lease-1',
       landlordId: 'landlord-1',
       tenantId: 'tenant-1',
       status: 'active',
-      rentAmount: 1000,
+      rentAmount: 100000,
       currency: 'USDC',
-      startDate: '2025-01-01',
-      endDate: '2026-01-01',
-      renewable: true,
-      disputed: false,
+      startDate: '2025-08-01',
+      endDate: '2026-07-31',
     });
 
-    app = express();
-    app.use(express.json());
-    app.use('/api', createPaymentRoutes(db));
+    app = createApp({ config, database });
   });
 
-  test('landlord utility upload calculates tenant share and updates upcoming payment total', async () => {
-    const uploadResponse = await request(app)
-      .post('/api/leases/lease-utility-1/utility-bills')
+  test('records utility bill, calculates tenant share, and updates upcoming payment total', async () => {
+    const upload = await request(app)
+      .post('/api/leases/lease-1/utility-bills')
       .send({
-        landlord_id: 'landlord-1',
-        bill_amount: 200,
-        tenant_share_ratio: 0.5,
-        billing_cycle: '2026-03',
-        currency: 'USDC',
+        landlordId: 'landlord-1',
+        utilityType: 'water',
+        totalAmount: 20000,
+        tenantSharePercent: 50,
+        billingPeriodStart: '2026-07-01',
+        billingPeriodEnd: '2026-07-31',
+        nextRentCycleDate: '2026-08-01',
       });
 
-    expect(uploadResponse.status).toBe(201);
-    expect(uploadResponse.body.success).toBe(true);
-    expect(uploadResponse.body.utility_bill.tenantShareAmount).toBe(100);
-    expect(uploadResponse.body.upcoming_payment_total).toBe(1100);
+    expect(upload.status).toBe(200);
+    expect(upload.body.success).toBe(true);
+    expect(upload.body.data.utilityShareTotal).toBe(10000);
+    expect(upload.body.data.upcomingPaymentTotal).toBe(110000);
 
-    const upcomingResponse = await request(app).get('/api/leases/lease-utility-1/upcoming-payment');
+    const upcoming = await request(app)
+      .get('/api/tenants/tenant-1/upcoming-payment')
+      .query({ asOfDate: '2026-08-01' });
 
-    expect(upcomingResponse.status).toBe(200);
-    expect(upcomingResponse.body.success).toBe(true);
-    expect(upcomingResponse.body.base_rent_amount).toBe(1000);
-    expect(upcomingResponse.body.utility_share_total).toBe(100);
-    expect(upcomingResponse.body.upcoming_payment_total).toBe(1100);
-    expect(upcomingResponse.body.tenant_approval_required).toBe(true);
+    expect(upcoming.status).toBe(200);
+    expect(upcoming.body.success).toBe(true);
+    expect(upcoming.body.data.leaseId).toBe('lease-1');
+    expect(upcoming.body.data.utilityShareTotal).toBe(10000);
+    expect(upcoming.body.data.upcomingPaymentTotal).toBe(110000);
+    expect(upcoming.body.data.approvalRequired).toBe(true);
   });
 
-  test('rejects utility bill upload when caller is not the lease landlord', async () => {
-    const response = await request(app)
-      .post('/api/leases/lease-utility-1/utility-bills')
+  test('accumulates multiple utility bills for the same rent cycle', async () => {
+    await request(app)
+      .post('/api/leases/lease-1/utility-bills')
       .send({
-        landlord_id: 'landlord-2',
-        bill_amount: 200,
-        tenant_share_ratio: 0.5,
-        billing_cycle: '2026-03',
+        landlordId: 'landlord-1',
+        utilityType: 'water',
+        totalAmount: 20000,
+        tenantSharePercent: 50,
+        nextRentCycleDate: '2026-08-01',
+      });
+
+    const second = await request(app)
+      .post('/api/leases/lease-1/utility-bills')
+      .send({
+        landlordId: 'landlord-1',
+        utilityType: 'electricity',
+        totalAmount: 10000,
+        tenantShareAmount: 2500,
+        nextRentCycleDate: '2026-08-01',
+      });
+
+    expect(second.status).toBe(200);
+    expect(second.body.data.utilityShareTotal).toBe(12500);
+    expect(second.body.data.upcomingPaymentTotal).toBe(112500);
+  });
+
+  test('returns 404 for upcoming payment approval before due date', async () => {
+    await request(app)
+      .post('/api/leases/lease-1/utility-bills')
+      .send({
+        landlordId: 'landlord-1',
+        utilityType: 'water',
+        totalAmount: 20000,
+        tenantSharePercent: 50,
+        nextRentCycleDate: '2026-08-01',
+      });
+
+    const response = await request(app)
+      .get('/api/tenants/tenant-1/upcoming-payment')
+      .query({ asOfDate: '2026-07-30' });
+
+    expect(response.status).toBe(404);
+    expect(response.body.error).toBe('No upcoming payment ready for approval');
+  });
+
+  test('rejects utility bill upload from landlord not tied to lease', async () => {
+    const response = await request(app)
+      .post('/api/leases/lease-1/utility-bills')
+      .send({
+        landlordId: 'landlord-2',
+        utilityType: 'water',
+        totalAmount: 20000,
+        tenantSharePercent: 50,
+        nextRentCycleDate: '2026-08-01',
       });
 
     expect(response.status).toBe(403);
-    expect(response.body.success).toBe(false);
+    expect(response.body.error).toBe('Landlord is not authorized for this lease');
   });
 });

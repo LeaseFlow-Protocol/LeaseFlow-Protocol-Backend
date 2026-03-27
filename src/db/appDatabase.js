@@ -153,6 +153,31 @@ class AppDatabase {
         approval_status     TEXT NOT NULL DEFAULT 'pending',
         updated_at          TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS utility_bills (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        landlord_id TEXT NOT NULL,
+        utility_type TEXT NOT NULL,
+        total_amount INTEGER NOT NULL,
+        tenant_share_amount INTEGER NOT NULL,
+        billing_period_start TEXT,
+        billing_period_end TEXT,
+        next_rent_cycle_date TEXT NOT NULL,
+        uploaded_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_utility_bills_lease_cycle
+        ON utility_bills (lease_id, next_rent_cycle_date);
+
+      -- Sanctions-related indexes
+      CREATE INDEX IF NOT EXISTS idx_sanctions_violations_lease_id ON sanctions_violations(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_sanctions_violations_address ON sanctions_violations(address);
+      CREATE INDEX IF NOT EXISTS idx_sanctions_violations_status ON sanctions_violations(status);
+      CREATE INDEX IF NOT EXISTS idx_lease_freeze_events_lease_id ON lease_freeze_events(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_sanctions_cache_address ON sanctions_cache(address);
+      CREATE INDEX IF NOT EXISTS idx_sanctions_cache_source ON sanctions_cache(source);
+      CREATE INDEX IF NOT EXISTS idx_sanctions_cache_expires_at ON sanctions_cache(expires_at);
     `);
   }
 
@@ -555,6 +580,158 @@ class AppDatabase {
       `,
       )
       .all(proposalId);
+  }
+
+  /**
+   * Record a landlord-uploaded utility bill and recalculate the tenant's
+   * upcoming payment total for the specified rent cycle.
+   *
+   * @param {object} input Utility billing input.
+   * @returns {{leaseId: string, tenantId: string, dueDate: string, rentAmount: number, utilityShareTotal: number, upcomingPaymentTotal: number, currency: string}}
+   */
+  recordUtilityBillAndReconcileUpcomingPayment(input) {
+    return this.transaction(() => {
+      const lease = this.getLeaseById(input.leaseId);
+      if (!lease) {
+        throw new Error('Lease not found');
+      }
+
+      if (lease.landlordId !== input.landlordId) {
+        throw new Error('Landlord is not authorized for this lease');
+      }
+
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          `INSERT INTO utility_bills (
+             id, lease_id, landlord_id, utility_type, total_amount,
+             tenant_share_amount, billing_period_start, billing_period_end,
+             next_rent_cycle_date, uploaded_at
+           )
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.id || crypto.randomUUID(),
+          input.leaseId,
+          input.landlordId,
+          input.utilityType,
+          input.totalAmount,
+          input.tenantShareAmount,
+          input.billingPeriodStart || null,
+          input.billingPeriodEnd || null,
+          input.nextRentCycleDate,
+          now,
+        );
+
+      const utilityTotalsRow = this.db
+        .prepare(
+          `SELECT COALESCE(SUM(tenant_share_amount), 0) AS utilityShareTotal
+           FROM utility_bills
+           WHERE lease_id = ? AND next_rent_cycle_date = ?`,
+        )
+        .get(input.leaseId, input.nextRentCycleDate);
+
+      const utilityShareTotal = Number(utilityTotalsRow?.utilityShareTotal || 0);
+      const upcomingPaymentTotal = Number(lease.rentAmount) + utilityShareTotal;
+
+      const existingSchedule = this.db
+        .prepare(
+          `SELECT id
+           FROM payment_schedules
+           WHERE lease_id = ? AND due_date = ?
+           ORDER BY created_at DESC
+           LIMIT 1`,
+        )
+        .get(input.leaseId, input.nextRentCycleDate);
+
+      if (existingSchedule?.id) {
+        this.db
+          .prepare(
+            `UPDATE payment_schedules
+             SET amount = ?,
+                 currency = ?,
+                 updated_at = ?
+             WHERE id = ?`,
+          )
+          .run(String(upcomingPaymentTotal), lease.currency, now, existingSchedule.id);
+      } else {
+        this.db
+          .prepare(
+            `INSERT INTO payment_schedules (
+               id, lease_id, amount, currency, due_date, status, created_at, updated_at
+             )
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            crypto.randomUUID(),
+            input.leaseId,
+            String(upcomingPaymentTotal),
+            lease.currency,
+            input.nextRentCycleDate,
+            'PENDING',
+            now,
+            now,
+          );
+      }
+
+      return {
+        leaseId: input.leaseId,
+        tenantId: lease.tenantId,
+        dueDate: input.nextRentCycleDate,
+        rentAmount: Number(lease.rentAmount),
+        utilityShareTotal,
+        upcomingPaymentTotal,
+        currency: lease.currency,
+      };
+    });
+  }
+
+  /**
+   * Fetch upcoming payment totals for a tenant for a rent cycle that has
+   * reached (or passed) its due date so frontend approval can be requested.
+   *
+   * @param {string} tenantId Tenant identifier.
+   * @param {string} asOfDate ISO date string used as the rent-cycle trigger check.
+   * @returns {object|null}
+   */
+  getUpcomingPaymentForTenantApproval(tenantId, asOfDate) {
+    const row = this.db
+      .prepare(
+        `SELECT
+           l.id AS leaseId,
+           l.tenant_id AS tenantId,
+           l.rent_amount AS rentAmount,
+           l.currency AS currency,
+           ps.due_date AS dueDate,
+           ps.amount AS upcomingPaymentTotal,
+           (
+             SELECT COALESCE(SUM(ub.tenant_share_amount), 0)
+             FROM utility_bills ub
+             WHERE ub.lease_id = l.id AND ub.next_rent_cycle_date = ps.due_date
+           ) AS utilityShareTotal
+         FROM leases l
+         INNER JOIN payment_schedules ps ON ps.lease_id = l.id
+         WHERE l.tenant_id = ?
+           AND ps.due_date <= ?
+         ORDER BY ps.due_date DESC
+         LIMIT 1`,
+      )
+      .get(tenantId, asOfDate);
+
+    if (!row) {
+      return null;
+    }
+
+    return {
+      leaseId: row.leaseId,
+      tenantId: row.tenantId,
+      dueDate: row.dueDate,
+      rentAmount: Number(row.rentAmount),
+      utilityShareTotal: Number(row.utilityShareTotal || 0),
+      upcomingPaymentTotal: Number(row.upcomingPaymentTotal || 0),
+      currency: row.currency,
+      approvalRequired: true,
+    };
   }
   // ---------------------------------------------------------------------------
   // Payment history methods (Issue #16 — Real-Time Rent Payment Tracker)

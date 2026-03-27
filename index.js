@@ -160,10 +160,12 @@ function createApp(dependencies = {}) {
   });
 
   // --- API Routes ---
-  app.use("/api/leases", leaseRoutes);
-  app.use("/api/owners", ownerRoutes);
-  app.use("/api", createPaymentRoutes(database));
-  app.use("/api/late-fees", createLateFeeRoutes(lateFeeController));
+  app.use('/api/leases', leaseRoutes);
+  app.use('/api/owners', ownerRoutes);
+  app.use('/api/kyc', kycRoutes);
+  app.use('/api/sanctions', sanctionsRoutes);
+  app.use('/api/eviction-notices', evictionNoticeRoutes);
+  app.use('/api', createPaymentRoutes(database));
 
   // --- Lease Renewal Routes ---
   app.get(

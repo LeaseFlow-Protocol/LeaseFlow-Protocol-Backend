@@ -21,6 +21,120 @@ function createPaymentRoutes(database) {
   const router = express.Router();
 
   /**
+   * POST /api/leases/:leaseId/utility-bills
+   * Upload utility billing details and update upcoming payment total.
+   */
+  router.post('/leases/:leaseId/utility-bills', (req, res) => {
+    const { leaseId } = req.params;
+    const {
+      landlordId,
+      utilityType,
+      totalAmount,
+      tenantSharePercent,
+      tenantShareAmount,
+      billingPeriodStart,
+      billingPeriodEnd,
+      nextRentCycleDate,
+    } = req.body || {};
+
+    if (!leaseId || !leaseId.trim()) {
+      return res.status(400).json({ success: false, error: 'leaseId is required' });
+    }
+
+    if (!landlordId || !String(landlordId).trim()) {
+      return res.status(400).json({ success: false, error: 'landlordId is required' });
+    }
+
+    if (!utilityType || !String(utilityType).trim()) {
+      return res.status(400).json({ success: false, error: 'utilityType is required' });
+    }
+
+    if (totalAmount == null || Number.isNaN(Number(totalAmount)) || Number(totalAmount) < 0) {
+      return res.status(400).json({ success: false, error: 'totalAmount must be a non-negative number' });
+    }
+
+    if (!nextRentCycleDate || !String(nextRentCycleDate).trim()) {
+      return res.status(400).json({ success: false, error: 'nextRentCycleDate is required' });
+    }
+
+    const hasShareAmount = tenantShareAmount != null;
+    const hasSharePercent = tenantSharePercent != null;
+
+    if (!hasShareAmount && !hasSharePercent) {
+      return res.status(400).json({
+        success: false,
+        error: 'Provide either tenantShareAmount or tenantSharePercent',
+      });
+    }
+
+    let computedTenantShareAmount;
+    if (hasShareAmount) {
+      const shareAmountNumber = Number(tenantShareAmount);
+      if (Number.isNaN(shareAmountNumber) || shareAmountNumber < 0) {
+        return res.status(400).json({ success: false, error: 'tenantShareAmount must be a non-negative number' });
+      }
+      computedTenantShareAmount = Math.round(shareAmountNumber);
+    } else {
+      const sharePercentNumber = Number(tenantSharePercent);
+      if (Number.isNaN(sharePercentNumber) || sharePercentNumber < 0 || sharePercentNumber > 100) {
+        return res.status(400).json({ success: false, error: 'tenantSharePercent must be a number between 0 and 100' });
+      }
+      computedTenantShareAmount = Math.round((Number(totalAmount) * sharePercentNumber) / 100);
+    }
+
+    try {
+      const result = database.recordUtilityBillAndReconcileUpcomingPayment({
+        leaseId: leaseId.trim(),
+        landlordId: String(landlordId).trim(),
+        utilityType: String(utilityType).trim(),
+        totalAmount: Math.round(Number(totalAmount)),
+        tenantShareAmount: computedTenantShareAmount,
+        billingPeriodStart: billingPeriodStart || null,
+        billingPeriodEnd: billingPeriodEnd || null,
+        nextRentCycleDate: String(nextRentCycleDate).trim(),
+      });
+
+      return res.status(200).json({ success: true, data: result });
+    } catch (err) {
+      if (err.message === 'Lease not found') {
+        return res.status(404).json({ success: false, error: err.message });
+      }
+
+      if (err.message === 'Landlord is not authorized for this lease') {
+        return res.status(403).json({ success: false, error: err.message });
+      }
+
+      console.error('[PaymentRoutes] Error reconciling utility bill:', err);
+      return res.status(500).json({ success: false, error: 'Failed to reconcile utility bill' });
+    }
+  });
+
+  /**
+   * GET /api/tenants/:tenantId/upcoming-payment
+   * Returns updated upcoming payment total for tenant approval once rent cycle is due.
+   */
+  router.get('/tenants/:tenantId/upcoming-payment', (req, res) => {
+    const { tenantId } = req.params;
+    const asOfDate = String(req.query.asOfDate || new Date().toISOString().slice(0, 10));
+
+    if (!tenantId || !tenantId.trim()) {
+      return res.status(400).json({ success: false, error: 'tenantId is required' });
+    }
+
+    try {
+      const upcomingPayment = database.getUpcomingPaymentForTenantApproval(tenantId.trim(), asOfDate);
+      if (!upcomingPayment) {
+        return res.status(404).json({ success: false, error: 'No upcoming payment ready for approval' });
+      }
+
+      return res.status(200).json({ success: true, data: upcomingPayment });
+    } catch (err) {
+      console.error('[PaymentRoutes] Error fetching tenant upcoming payment:', err);
+      return res.status(500).json({ success: false, error: 'Failed to fetch upcoming payment' });
+    }
+  });
+
+  /**
    * GET /api/leases/:leaseId/payments
    * Returns the full recorded payment history for a specific lease.
    */
