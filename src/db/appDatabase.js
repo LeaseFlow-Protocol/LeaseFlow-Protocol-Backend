@@ -53,6 +53,11 @@ class AppDatabase {
         tenant_account_id TEXT,
         payment_status TEXT NOT NULL DEFAULT 'pending',
         last_payment_at TEXT,
+        landlord_stellar_address TEXT,
+        tenant_stellar_address TEXT,
+        sanctions_status TEXT DEFAULT 'CLEAN',
+        sanctions_check_at TEXT,
+        sanctions_violation_count INTEGER DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -984,6 +989,13 @@ function normalizeProposalRow(row) {
     sorobanContractReference: row.sorobanContractReference
       ? JSON.parse(row.sorobanContractReference)
       : null,
+  };
+}
+
+function normalizeKycRow(row) {
+  return {
+    ...row,
+    isVerified: row.kycStatus === 'verified'
   };
 }
 
