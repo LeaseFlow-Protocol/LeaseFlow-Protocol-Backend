@@ -306,6 +306,90 @@ class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_vendors_kyc_status ON vendors(kyc_status);
 
       ALTER TABLE leases ADD COLUMN IF NOT EXISTS has_active_maintenance INTEGER DEFAULT 0;
+
+      -- Smart lock integration tables (Task 2: IoT Smart Lock Gateway)
+      CREATE TABLE IF NOT EXISTS smart_locks (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        lock_provider TEXT NOT NULL CHECK (lock_provider IN ('august', 'yale', 'schlage', 'other')),
+        device_id TEXT NOT NULL UNIQUE,
+        device_name TEXT,
+        access_token TEXT,
+        refresh_token TEXT,
+        token_expires_at TEXT,
+        pairing_status TEXT DEFAULT 'pending' CHECK (pairing_status IN ('pending', 'paired', 'error', 'unpaired')),
+        last_sync_at TEXT,
+        firmware_version TEXT,
+        battery_level INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS digital_keys (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        smart_lock_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        tenant_account_id TEXT NOT NULL,
+        key_type TEXT NOT NULL DEFAULT 'bluetooth' CHECK (key_type IN ('bluetooth', 'wifi', 'cloud')),
+        key_data TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'expired')),
+        valid_from TEXT NOT NULL,
+        valid_until TEXT NOT NULL,
+        revoked_at TEXT,
+        revoke_reason TEXT,
+        last_used_at TEXT,
+        usage_count INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id),
+        FOREIGN KEY (smart_lock_id) REFERENCES smart_locks(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS key_usage_logs (
+        id TEXT PRIMARY KEY,
+        digital_key_id TEXT NOT NULL,
+        smart_lock_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('unlock', 'lock', 'access_granted', 'access_denied', 'key_revoked')),
+        result TEXT NOT NULL CHECK (result IN ('success', 'failure', 'denied')),
+        failure_reason TEXT,
+        ip_address TEXT,
+        location_data TEXT,
+        metadata TEXT,
+        performed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (digital_key_id) REFERENCES digital_keys(id),
+        FOREIGN KEY (smart_lock_id) REFERENCES smart_locks(id),
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS lease_enforcement_checks (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        check_type TEXT NOT NULL CHECK (check_type IN ('rent_payment', 'lease_active', 'lease_expired', 'breach_detected')),
+        soroban_contract_status TEXT,
+        rent_current INTEGER,
+        enforcement_action TEXT,
+        check_result TEXT NOT NULL CHECK (check_result IN ('pass', 'fail', 'warning')),
+        details TEXT,
+        checked_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_smart_locks_lease_id ON smart_locks(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_smart_locks_device_id ON smart_locks(device_id);
+      CREATE INDEX IF NOT EXISTS idx_digital_keys_lease_id ON digital_keys(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_digital_keys_tenant_id ON digital_keys(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_digital_keys_status ON digital_keys(status);
+      CREATE INDEX IF NOT EXISTS idx_digital_keys_valid_until ON digital_keys(valid_until);
+      CREATE INDEX IF NOT EXISTS idx_key_usage_logs_digital_key_id ON key_usage_logs(digital_key_id);
+      CREATE INDEX IF NOT EXISTS idx_key_usage_logs_smart_lock_id ON key_usage_logs(smart_lock_id);
+      CREATE INDEX IF NOT EXISTS idx_lease_enforcement_checks_lease_id ON lease_enforcement_checks(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_lease_enforcement_checks_checked_at ON lease_enforcement_checks(checked_at);
     `);
   }
 
