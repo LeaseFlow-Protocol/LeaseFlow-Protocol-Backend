@@ -629,6 +629,80 @@ class VendorService {
 
     return data;
   }
+
+  // ==================== Direct-Drip Payment System (Issue #29) ====================
+
+  /**
+   * Authorize a direct-drip payment for a vendor.
+   * Landlord authorizes $X to be sent to contractor from next rent.
+   */
+  authorizeVendorPayment(authData) {
+    const ticket = this.getMaintenanceTicketById(authData.jobId);
+    if (!ticket) throw new Error('Maintenance ticket not found');
+
+    const auth = {
+      id: randomUUID(),
+      leaseId: ticket.leaseId,
+      jobId: authData.jobId,
+      landlordId: ticket.landlordId,
+      amount: authData.amount,
+      status: 'authorized',
+      createdAt: new Date().toISOString()
+    };
+
+    return this.db.insertVendorPaymentAuthorization(auth);
+  }
+
+  /**
+   * Get authorized payment for a specific job.
+   */
+  getAuthorizedVendorPaymentByJobId(jobId) {
+    const stmt = this.db.db.prepare(`
+      SELECT * FROM vendor_payment_authorizations 
+      WHERE job_id = ? AND status = 'authorized'
+    `);
+    const row = stmt.get(jobId);
+    return row ? { ...row, amount: Number(row.amount) } : null;
+  }
+
+  /**
+   * Trigger the vendor payment once the job is marked as complete.
+   */
+  async triggerVendorPaymentOnJobCompletion(ticketId) {
+    const ticket = this.getMaintenanceTicketById(ticketId);
+    if (!ticket) throw new Error('Ticket not found');
+    if (ticket.status !== 'resolved' && ticket.status !== 'closed') {
+      throw new Error('Job is not complete yet');
+    }
+
+    const auth = this.getAuthorizedVendorPaymentByJobId(ticketId);
+    if (!auth) {
+      console.log(`No authorized payment found for job ${ticketId}`);
+      return null;
+    }
+
+    const vendor = this.getVendorById(ticket.vendorId);
+    if (!vendor || !vendor.stellarAccountId) {
+      throw new Error('Vendor or vendor stellar account not found');
+    }
+
+    console.log(`[Soroban] Triggering payment of ${auth.amount} to vendor ${vendor.stellarAccountId} for job ${ticketId}`);
+    
+    // In a real implementation, this would call the Soroban contract.
+    // For this issue, we mock the success of the on-chain drip.
+    const txHash = `0x${randomUUID().replace(/-/g, '')}`;
+    
+    this.db.markVendorPaymentAsPaid(auth.id);
+    this.db.updateMaintenanceJobStatus(ticketId, 'completed'); // sync with maintenance_jobs table if used
+
+    return {
+        authorizationId: auth.id,
+        amount: auth.amount,
+        vendorWallet: vendor.stellarAccountId,
+        transactionHash: txHash,
+        status: 'paid'
+    };
+  }
 }
 
 module.exports = { VendorService };

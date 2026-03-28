@@ -125,4 +125,21 @@ router.get('/:leaseCID/handshake', (req, res) => LeaseController.getHandshake(re
  */
 router.get('/active', (req, res) => LeaseController.getActiveLeases(req, res));
 
+/**
+ * @openapi
+ * /api/leases/{leaseId}/status:
+ *   get:
+ *     summary: Get Lease Status (Redis Cached)
+ *     description: Checks the status of a lease. Uses Redis for sub-millisecond response.
+ *     tags: [Leases]
+ *     parameters:
+ *       - in: path
+ *         name: leaseId
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Lease status information
+ */
+router.get('/:leaseId/status', (req, res) => LeaseController.getLeaseStatus(req, res));
+
 module.exports = router;

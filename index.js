@@ -55,6 +55,14 @@ const {
 // Routes
 const leaseRoutes = require("./src/routes/leaseRoutes");
 const ownerRoutes = require("./src/routes/ownerRoutes");
+const kycRoutes = require("./src/routes/kycRoutes");
+const sanctionsRoutes = require("./src/routes/sanctionsRoutes");
+const evictionNoticeRoutes = require("./src/routes/evictionNoticeRoutes");
+const vendorRoutes = require("./src/routes/vendorRoutes");
+const taxRoutes = require("./src/routes/taxRoutes");
+const propertyRoutes = require("./src/routes/propertyRoutes");
+
+const { LeaseCacheService } = require("./src/services/LeaseCacheService");
 
 /**
  * Build authentication middleware for landlords and tenants.
@@ -119,12 +127,14 @@ function createApp(dependencies = {}) {
     createConditionProofService({ store: createFileConditionProofStore() });
   const depositGatekeeper =
     dependencies.securityDepositService || createSecurityDepositLockService();
+  const leaseCacheService = dependencies.leaseCacheService || new LeaseCacheService(database);
 
   // Inject for use in routes/controllers
   app.locals.database = database;
   app.locals.availabilityService = availabilityService;
   app.locals.assetMetadataService = assetMetadataService;
   app.locals.lateFeeService = lateFeeService;
+  app.locals.leaseCacheService = leaseCacheService;
 
   // Middleware
   app.use(cors());
@@ -165,6 +175,9 @@ function createApp(dependencies = {}) {
   app.use('/api/kyc', kycRoutes);
   app.use('/api/sanctions', sanctionsRoutes);
   app.use('/api/eviction-notices', evictionNoticeRoutes);
+  app.use('/api/vendors', vendorRoutes);
+  app.use('/api/tax', taxRoutes);
+  app.use('/api/properties', propertyRoutes);
   app.use('/api', createPaymentRoutes(database));
 
   // --- Lease Renewal Routes ---

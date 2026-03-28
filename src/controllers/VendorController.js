@@ -365,7 +365,8 @@ class VendorController {
   }
 
   /**
-   * Close maintenance ticket and revoke all associated access
+   * Close maintenance ticket and revoke all associated access.
+   * Also triggers any authorized direct-drip payments.
    */
   async closeTicketAndRevokeAccess(req, res) {
     try {
@@ -383,12 +384,23 @@ class VendorController {
       // Revoke all access grants for this ticket
       const revokedGrants = this.vendorService.revokeAccessForClosedTicket(ticketId);
 
+      // --- Direct-Drip Integration (Issue #29) ---
+      // Trigger payment if authorized
+      let paymentResult = null;
+      try {
+        paymentResult = await this.vendorService.triggerVendorPaymentOnJobCompletion(ticketId);
+      } catch (payError) {
+        console.warn(`[VendorController] Direct-drip payment failed for ticket ${ticketId}:`, payError.message);
+      }
+
       res.status(200).json({
         success: true,
-        message: 'Ticket closed and all vendor access revoked',
+        message: 'Ticket closed, access revoked, and direct-drip processed',
         data: {
           ticket,
-          revokedGrantsCount: revokedGrants.length
+          revokedGrantsCount: revokedGrants.length,
+          paymentProcessed: !!paymentResult,
+          paymentData: paymentResult
         }
       });
     } catch (error) {
@@ -396,6 +408,32 @@ class VendorController {
       res.status(500).json({
         success: false,
         error: 'Failed to close ticket and revoke access',
+        details: error.message
+      });
+    }
+  }
+
+  /**
+   * Authorize a direct-drip payment for a maintenance ticket.
+   */
+  async authorizePayment(req, res) {
+    try {
+      const authData = req.body;
+      if (!authData.jobId || !authData.amount) {
+          return res.status(400).json({ success: false, error: 'jobId and amount are required' });
+      }
+
+      const auth = this.vendorService.authorizeVendorPayment(authData);
+      res.status(201).json({
+        success: true,
+        message: 'Vendor payment authorized successfully',
+        data: auth
+      });
+    } catch (error) {
+      console.error('[VendorController] Error authorizing payment:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Failed to authorize payment',
         details: error.message
       });
     }

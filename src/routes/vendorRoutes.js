@@ -414,4 +414,31 @@ router.post('/access/log', (req, res) => vendorController.recordAccess(req, res)
  */
 router.post('/tickets/:ticketId/close', (req, res) => vendorController.closeTicketAndRevokeAccess(req, res));
 
+/**
+ * @openapi
+ * /api/vendors/payments/authorize:
+ *   post:
+ *     summary: Authorize dynamic vendor payment (Direct-Drip)
+ *     description: Landlords can authorize a plumber or contractor to be paid from the next rent
+ *     tags: [Finance]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - jobId
+ *               - amount
+ *             properties:
+ *               jobId:
+ *                 type: string
+ *               amount:
+ *                 type: number
+ *     responses:
+ *       201:
+ *         description: Payment authorized successfully
+ */
+router.post('/payments/authorize', (req, res) => vendorController.authorizePayment(req, res));
+
 module.exports = router;

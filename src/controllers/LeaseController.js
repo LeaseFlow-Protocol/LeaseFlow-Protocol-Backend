@@ -123,6 +123,38 @@ class LeaseController {
             return res.status(500).json({ error: 'Internal server error while retrieving active leases.', details: error.message });
         }
     }
+
+    /**
+     * Get lease status, checking Redis cache first.
+     * @route GET /api/leases/:leaseId/status
+     */
+    async getLeaseStatus(req, res) {
+        try {
+            const { leaseId } = req.params;
+            const cacheService = req.app.locals.leaseCacheService;
+
+            if (!cacheService) {
+                console.warn("[LeaseController] LeaseCacheService not found in app.locals.");
+                // Fallback to DB
+                const database = req.app.locals.database;
+                const lease = database.getLeaseById(leaseId);
+                return res.status(200).json({ success: true, data: lease });
+            }
+
+            const status = await cacheService.getLeaseStatus(leaseId);
+            if (!status) {
+                return res.status(404).json({ success: false, error: 'Lease not found' });
+            }
+
+            return res.status(200).json({
+                success: true,
+                data: status
+            });
+        } catch (error) {
+            console.error('[LeaseController] Error fetching lease status:', error);
+            return res.status(500).json({ success: false, error: 'Internal server error' });
+        }
+    }
 }
 
 module.exports = new LeaseController();
