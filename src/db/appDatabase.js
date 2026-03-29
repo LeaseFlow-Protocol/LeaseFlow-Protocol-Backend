@@ -58,6 +58,13 @@ class AppDatabase {
         sanctions_status TEXT DEFAULT 'CLEAN',
         sanctions_check_at TEXT,
         sanctions_violation_count INTEGER DEFAULT 0,
+        city TEXT,
+        state TEXT,
+        country TEXT DEFAULT 'Nigeria',
+        property_type TEXT,
+        bedrooms INTEGER,
+        bathrooms INTEGER,
+        square_footage INTEGER,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
