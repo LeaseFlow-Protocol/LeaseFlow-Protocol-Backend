@@ -64,6 +64,7 @@ const vendorRoutes = require("./src/routes/vendorRoutes");
 const taxRoutes = require("./src/routes/taxRoutes");
 const propertyRoutes = require("./src/routes/propertyRoutes");
 const marketTrendsRoutes = require("./src/routes/marketTrendsRoutes");
+const referralRoutes = require("./src/routes/referralRoutes");
 
 const { LeaseCacheService } = require("./src/services/LeaseCacheService");
 
@@ -185,6 +186,7 @@ function createApp(dependencies = {}) {
   app.use('/api/tax', taxRoutes);
   app.use('/api/properties', propertyRoutes);
   app.use('/api/market-trends', marketTrendsRoutes);
+  app.use('/api/referrals', referralRoutes);
   app.use('/api', createPaymentRoutes(database));
 
   // --- Lease Renewal Routes ---
