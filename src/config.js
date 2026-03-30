@@ -46,6 +46,13 @@ function loadConfig(env = process.env) {
       defaultContractId: env.SOROBAN_CONTRACT_ID || DEFAULT_CONTRACT_ID,
       rpcUrl: env.RPC_URL || 'https://soroban-testnet.stellar.org',
     },
+    // --- Sentry Error Tracking (Task 2) ---
+    sentry: {
+      dsn: env.SENTRY_DSN,
+      environment: env.NODE_ENV || 'development',
+      tracesSampleRate: parseFloat(env.SENTRY_TRACES_SAMPLE_RATE) || 0.1,
+      sampleRate: parseFloat(env.SENTRY_SAMPLE_RATE) || 1.0,
+    },
   };
 }
 

@@ -11,6 +11,10 @@ const sharp = require("sharp");
 const swaggerUi = require("swagger-ui-express");
 const swaggerSpecs = require("./src/swagger");
 
+// Sentry Error Tracking
+const { SentryService, createSentryMiddleware } = require("./src/services/sentryService");
+const sentryService = new SentryService();
+
 // Services & Config
 const { loadConfig } = require("./src/config");
 const { AppDatabase } = require("./src/db/appDatabase");
@@ -67,6 +71,10 @@ const marketTrendsRoutes = require("./src/routes/marketTrendsRoutes");
 const referralRoutes = require("./src/routes/referralRoutes");
 
 const { LeaseCacheService } = require("./src/services/LeaseCacheService");
+
+// Audit Service
+const { AuditService } = require("./src/services/auditService");
+const { createAuditRoutes } = require("./src/routes/auditRoutes");
 
 /**
  * Build authentication middleware for landlords and tenants.
@@ -148,6 +156,16 @@ function createApp(dependencies = {}) {
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
+  // Initialize Sentry
+  if (config.sentry?.dsn) {
+    sentryService.initialize(config.sentry);
+    app.use(createSentryMiddleware(sentryService));
+  }
+
+  // Audit Service
+  const auditService = new AuditService(database);
+  app.locals.auditService = auditService;
+
   // Static Files
   const uploadDir = path.join(__dirname, "uploads");
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -176,6 +194,44 @@ function createApp(dependencies = {}) {
     });
   });
 
+  // Health Check Endpoint for Load Balancers and Monitoring
+  app.get("/health", (req, res) => {
+    const health = {
+      status: "ok",
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: config.sentry?.environment || process.env.NODE_ENV || "development",
+      version: "1.0.0",
+    };
+
+    // Check database connectivity
+    try {
+      req.app.locals.database.db.prepare("SELECT 1").get();
+      health.database = "connected";
+    } catch (error) {
+      health.database = "disconnected";
+      health.status = "degraded";
+    }
+
+    // Check if Sentry monitoring is enabled
+    if (config.sentry?.dsn) {
+      health.monitoring = "enabled";
+    } else {
+      health.monitoring = "disabled";
+    }
+
+    // Check if audit logging is available
+    try {
+      req.app.locals.database.db.prepare("SELECT 1 FROM audit_log LIMIT 1").get();
+      health.audit_logging = "available";
+    } catch (error) {
+      health.audit_logging = "not_configured";
+    }
+
+    const statusCode = health.status === "ok" ? 200 : 503;
+    res.status(statusCode).json(health);
+  });
+
   // --- API Routes ---
   app.use('/api/leases', leaseRoutes);
   app.use('/api/owners', ownerRoutes);
@@ -188,6 +244,7 @@ function createApp(dependencies = {}) {
   app.use('/api/market-trends', marketTrendsRoutes);
   app.use('/api/referrals', referralRoutes);
   app.use('/api', createPaymentRoutes(database));
+  app.use('/api/audit', createAuditRoutes(database));
 
   // --- Lease Renewal Routes ---
   app.get(
@@ -324,6 +381,20 @@ function createApp(dependencies = {}) {
 
   // Error Handler
   app.use((err, req, res, next) => {
+    // Log to Sentry if initialized
+    if (config.sentry?.dsn) {
+      sentryService.captureException(err, {
+        publicKey: req.actor?.publicKey,
+        leaseId: req.params.leaseId || req.body?.leaseId,
+        extra: {
+          path: req.path,
+          method: req.method,
+          body: req.body,
+          query: req.query,
+        },
+      });
+    }
+
     console.error("[App] Error:", err);
     res
       .status(500)
