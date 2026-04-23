@@ -512,7 +512,7 @@ if (require.main === module) {
 
       const reclaimWorker = new AutoReclaimWorker();
       // Payment Tracker
-      const paymentTrackerService = new RentPaymentTrackerService(database, {
+      const paymentTrackerService = new RentPaymentTrackerService(database, sorobanLeaseService, {
         contractAccountId: config.contracts?.defaultContractId,
       });
       startPaymentTrackerJob(paymentTrackerService, {

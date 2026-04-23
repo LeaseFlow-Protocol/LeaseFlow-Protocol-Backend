@@ -43,6 +43,23 @@ class SorobanLeaseService {
       updatedAt: new Date().toISOString(),
     };
   }
+
+  /**
+   * Submit a purchase_credit update to the Soroban lease contract.
+   *
+   * @param {{leaseId: string, tenantId: string, purchaseCredit: number}} input
+   * @returns {{txHash: string, leaseId: string, purchaseCredit: number, updatedAt: string}}
+   */
+  updatePurchaseCredit(input) {
+    const txHash = `tx_credit_${crypto.randomUUID()}`;
+    console.log(`[Soroban] Updating Purchase Credit for lease ${input.leaseId}: ${input.purchaseCredit}`);
+    return {
+      txHash,
+      leaseId: input.leaseId,
+      purchaseCredit: input.purchaseCredit,
+      updatedAt: new Date().toISOString(),
+    };
+  }
 }
 
 module.exports = {

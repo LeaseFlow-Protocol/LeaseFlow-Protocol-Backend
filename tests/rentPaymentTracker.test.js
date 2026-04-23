@@ -56,12 +56,12 @@ function makeOp(overrides = {}) {
   };
 }
 
-function makeTracker(db, extraOptions = {}, horizonPayload = null) {
+function makeTracker(db, extraOptions = {}, horizonPayload = null, sorobanService = null) {
   const options = {
     contractAccountId: 'CONTRACT_ACCOUNT',
     ...extraOptions,
   };
-  const tracker = new RentPaymentTrackerService(db, options);
+  const tracker = new RentPaymentTrackerService(db, sorobanService, options);
 
   // Stub _fetchHorizon to avoid real HTTP calls
   tracker._fetchHorizon = async () =>
@@ -167,6 +167,34 @@ describe('RentPaymentTrackerService', () => {
 
       const saved = db.getPaymentByHorizonOpId(op.id);
       expect(saved.leaseId).toBeNull();
+    });
+
+    test('updates purchase credit when purchase option is enabled', async () => {
+      const db = makeDb();
+      seedLease(db, { 
+        tenantAccountId: 'TENANT_STELLAR_ACCOUNT',
+        rentAmount: 1000,
+        purchaseOptionEnabled: 1,
+        purchaseOptionRentShare: 0.2, // 20% equity
+        purchaseCredit: 100 // Existing equity
+      });
+
+      const op = makeOp({ amount: '1000.0000000' });
+      const sorobanService = {
+        updatePurchaseCredit: jest.fn().mockReturnValue({ txHash: 'tx_test' })
+      };
+      const tracker = makeTracker(db, {}, { _embedded: { records: [op] } }, sorobanService);
+
+      await tracker.poll();
+
+      const lease = db.getLeaseById('lease-001');
+      // 1000 * 0.2 = 200 equity earned. 100 + 200 = 300 total.
+      expect(lease.purchaseCredit).toBe(300);
+      expect(sorobanService.updatePurchaseCredit).toHaveBeenCalledWith({
+        leaseId: 'lease-001',
+        tenantId: 'tenant-1',
+        purchaseCredit: 300
+      });
     });
   });
 });

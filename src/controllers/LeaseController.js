@@ -155,6 +155,46 @@ class LeaseController {
             return res.status(500).json({ success: false, error: 'Internal server error' });
         }
     }
+
+    /**
+     * Enables the Purchase Option for a lease.
+     * @route POST /api/leases/:leaseId/purchase-option
+     */
+    async enablePurchaseOption(req, res) {
+        try {
+            const { leaseId } = req.params;
+            const { rentShare } = req.body;
+
+            if (rentShare === undefined || rentShare < 0 || rentShare > 1) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Invalid rentShare. Must be between 0 and 1.' 
+                });
+            }
+
+            const database = req.app.locals.database;
+            const lease = database.getLeaseById(leaseId);
+
+            if (!lease) {
+                return res.status(404).json({ success: false, error: 'Lease not found' });
+            }
+
+            database.enablePurchaseOption(leaseId, rentShare);
+
+            return res.status(200).json({
+                success: true,
+                message: 'Purchase option enabled successfully.',
+                data: {
+                    leaseId,
+                    purchaseOptionEnabled: true,
+                    purchaseOptionRentShare: rentShare
+                }
+            });
+        } catch (error) {
+            console.error('[LeaseController] Error enabling purchase option:', error);
+            return res.status(500).json({ success: false, error: 'Internal server error' });
+        }
+    }
 }
 
 module.exports = new LeaseController();

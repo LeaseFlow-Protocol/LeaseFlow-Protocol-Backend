@@ -67,6 +67,9 @@ class AppDatabase {
         square_footage INTEGER,
         remaining_balance REAL DEFAULT 0,
         applied_late_fee REAL DEFAULT 0,
+        purchase_option_enabled INTEGER NOT NULL DEFAULT 0,
+        purchase_option_rent_share REAL DEFAULT 0,
+        purchase_credit REAL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -424,9 +427,11 @@ class AppDatabase {
         `
         INSERT INTO leases (
           id, landlord_id, tenant_id, status, rent_amount, currency,
-          start_date, end_date, renewable, disputed, created_at, updated_at
+          start_date, end_date, renewable, disputed, 
+          purchase_option_enabled, purchase_option_rent_share, purchase_credit,
+          created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .run(
@@ -440,6 +445,9 @@ class AppDatabase {
         lease.endDate,
         lease.renewable === false ? 0 : 1,
         lease.disputed === true ? 1 : 0,
+        lease.purchaseOptionEnabled === true || lease.purchaseOptionEnabled === 1 ? 1 : 0,
+        lease.purchaseOptionRentShare || 0,
+        lease.purchaseCredit || 0,
         now,
         now,
       );
@@ -505,6 +513,9 @@ class AppDatabase {
           disputed,
           remaining_balance AS remainingBalance,
           applied_late_fee AS appliedLateFee,
+          purchase_option_enabled AS purchaseOptionEnabled,
+          purchase_option_rent_share AS purchaseOptionRentShare,
+          purchase_credit AS purchaseCredit,
           created_at AS createdAt,
           updated_at AS updatedAt
         FROM leases
@@ -539,6 +550,9 @@ class AppDatabase {
           payment_status    AS paymentStatus,
           remaining_balance AS remainingBalance,
           applied_late_fee  AS appliedLateFee,
+          purchase_option_enabled AS purchaseOptionEnabled,
+          purchase_option_rent_share AS purchaseOptionRentShare,
+          purchase_credit AS purchaseCredit,
           last_payment_at   AS lastPaymentAt,
           created_at        AS createdAt,
           updated_at        AS updatedAt
@@ -1304,6 +1318,9 @@ class AppDatabase {
            payment_status    AS paymentStatus,
            remaining_balance AS remainingBalance,
            applied_late_fee  AS appliedLateFee,
+           purchase_option_enabled AS purchaseOptionEnabled,
+           purchase_option_rent_share AS purchaseOptionRentShare,
+           purchase_credit AS purchaseCredit,
            last_payment_at   AS lastPaymentAt,
            created_at        AS createdAt,
            updated_at        AS updatedAt
@@ -1336,6 +1353,43 @@ class AppDatabase {
          WHERE id = ?`,
       )
       .run(remainingBalance, appliedLateFee, new Date().toISOString(), leaseId);
+  }
+
+  /**
+   * Update a lease's purchase credit (equity earned).
+   *
+   * @param {string} leaseId Lease identifier.
+   * @param {number} purchaseCredit The new total purchase credit.
+   * @returns {void}
+   */
+  updatePurchaseCredit(leaseId, purchaseCredit) {
+    this.db
+      .prepare(
+        `UPDATE leases
+         SET purchase_credit = ?,
+             updated_at      = ?
+         WHERE id = ?`,
+      )
+      .run(purchaseCredit, new Date().toISOString(), leaseId);
+  }
+
+  /**
+   * Enable and configure the purchase option for a lease.
+   *
+   * @param {string} leaseId Lease identifier.
+   * @param {number} rentShare Portion of rent (0.0 - 1.0) going toward purchase credit.
+   * @returns {void}
+   */
+  enablePurchaseOption(leaseId, rentShare) {
+    this.db
+      .prepare(
+        `UPDATE leases
+         SET purchase_option_enabled = 1,
+             purchase_option_rent_share = ?,
+             updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(rentShare, new Date().toISOString(), leaseId);
   }
 
   /**
@@ -1597,6 +1651,7 @@ function normalizeLeaseRow(row) {
     ...row,
     renewable: Boolean(row.renewable),
     disputed: Boolean(row.disputed),
+    purchaseOptionEnabled: Boolean(row.purchaseOptionEnabled),
   };
 }
 

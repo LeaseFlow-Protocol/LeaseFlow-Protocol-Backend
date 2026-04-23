@@ -142,4 +142,31 @@ router.get('/active', (req, res) => LeaseController.getActiveLeases(req, res));
  */
 router.get('/:leaseId/status', (req, res) => LeaseController.getLeaseStatus(req, res));
 
+/**
+ * @openapi
+ * /api/leases/{leaseId}/purchase-option:
+ *   post:
+ *     summary: Enable Purchase Option for a lease
+ *     description: Configures a portion of the rent to go toward an eventual down payment (equity).
+ *     tags: [Leases]
+ *     parameters:
+ *       - in: path
+ *         name: leaseId
+ *         required: true
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               rentShare:
+ *                 type: number
+ *                 description: Portion of rent (0.0 to 1.0) going toward purchase credit.
+ *     responses:
+ *       200:
+ *         description: Purchase option enabled successfully
+ */
+router.post('/:leaseId/purchase-option', (req, res) => LeaseController.enablePurchaseOption(req, res));
+
 module.exports = router;
