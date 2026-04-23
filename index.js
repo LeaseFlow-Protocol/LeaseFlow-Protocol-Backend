@@ -59,6 +59,7 @@ const { LeasePartitioningService } = require("./src/services/leasePartitioningSe
 const { LeaseArchivalJob } = require("./src/jobs/leaseArchivalJob");
 const LeaseContractController = require("./src/controllers/LeaseContractController");
 const RwaAssetController = require("./src/controllers/RwaAssetController");
+const WebSocketSystem = require("./src/websocket");
 
 // Routes
 const leaseRoutes = require("./src/routes/leaseRoutes");
@@ -162,6 +163,9 @@ function createApp(dependencies = {}) {
   // Initialize RWA Asset Controller
   const rwaAssetController = new RwaAssetController(database, config);
 
+  // Initialize WebSocket System
+  const webSocketSystem = new WebSocketSystem(config, database);
+
   // Inject for use in routes/controllers
   app.locals.database = database;
   app.locals.availabilityService = availabilityService;
@@ -171,6 +175,7 @@ function createApp(dependencies = {}) {
   app.locals.leasePartitioningService = leasePartitioningService;
   app.locals.leaseContractController = leaseContractController;
   app.locals.rwaAssetController = rwaAssetController;
+  app.locals.webSocketSystem = webSocketSystem;
   app.locals.iotDispatcher = iotDispatcher;
   app.locals.healthMonitor = healthMonitor;
   app.locals.dunningSequencer = dunningSequencer;
@@ -469,8 +474,8 @@ if (require.main === module) {
     }
   };
 
-  initServices().finally(() => {
-    app.listen(port, () => {
+  initServices().finally(async () => {
+    app.listen(port, async () => {
       console.log(`LeaseFlow Backend running at http://localhost:${port}`);
 
       // Background Jobs
@@ -541,6 +546,17 @@ if (require.main === module) {
       if (config.rwaCache?.enabled !== false) {
         rwaAssetController.initialize();
         console.log("RWA asset cache service started");
+      }
+      
+      // Initialize WebSocket System
+      if (config.websocket?.enabled !== false) {
+        try {
+          await webSocketSystem.initialize(server);
+          await webSocketSystem.start();
+          console.log("WebSocket system started");
+        } catch (error) {
+          console.error("Failed to start WebSocket system:", error);
+        }
       }
       
       // Start Dunning Pub/Sub listener
