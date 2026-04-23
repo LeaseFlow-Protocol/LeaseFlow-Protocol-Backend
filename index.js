@@ -180,6 +180,11 @@ function createApp(dependencies = {}) {
   app.locals.healthMonitor = healthMonitor;
   app.locals.dunningSequencer = dunningSequencer;
 
+  // Redis client for price caching
+  if (!app.locals.redisClient) {
+    app.locals.redisClient = null; // Will be initialized lazily in service
+  }
+
   // Middleware
   app.use(cors());
   app.use(express.json({ limit: "50mb" }));
@@ -277,6 +282,10 @@ function createApp(dependencies = {}) {
   app.use('/api/v1/oracles', oracleRoutes(database));
   app.use('/api', createPaymentRoutes(database));
   app.use('/api/audit', createAuditRoutes(database));
+  
+  // Proration Calculator Routes (Issue #93)
+  const prorationRoutes = require('./src/routes/prorationRoutes');
+  app.use('/api/v1', prorationRoutes);
 
   // --- Lease Renewal Routes ---
   app.get(
