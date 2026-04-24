@@ -49,6 +49,7 @@ function loadConfig(env = process.env) {
       monitorIntervalMs: Number(env.MONITOR_INTERVAL_MS || 10 * 1000),
       healthMonitorEnabled: env.HEALTH_MONITOR_ENABLED !== "false",
       archivalJobEnabled: env.LEASE_ARCHIVAL_JOB_ENABLED === "true",
+      abandonedAssetTrackingEnabled: env.ABANDONED_ASSET_TRACKING_ENABLED !== "false",
     },
     contracts: {
       defaultContractId: env.SOROBAN_CONTRACT_ID || DEFAULT_CONTRACT_ID,

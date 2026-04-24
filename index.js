@@ -57,6 +57,7 @@ const {
 } = require("./tenantCreditScoreAggregator");
 const { LeasePartitioningService } = require("./src/services/leasePartitioningService");
 const { LeaseArchivalJob } = require("./src/jobs/leaseArchivalJob");
+const { startAbandonedAssetTrackingJob } = require("./src/jobs/abandonedAssetTrackingJob");
 const LeaseContractController = require("./src/controllers/LeaseContractController");
 const RwaAssetController = require("./src/controllers/RwaAssetController");
 const WebSocketSystem = require("./src/websocket");
@@ -75,6 +76,7 @@ const propertyRoutes = require("./src/routes/propertyRoutes");
 const marketTrendsRoutes = require("./src/routes/marketTrendsRoutes");
 const referralRoutes = require("./src/routes/referralRoutes");
 const oracleRoutes = require("./src/routes/oracleRoutes");
+const { createAbandonedAssetRoutes } = require("./src/routes/abandonedAssetRoutes");
 
 const { LeaseCacheService } = require("./src/services/LeaseCacheService");
 const { IoT_Webhook_Dispatcher } = require("./src/services/IoT_Webhook_Dispatcher");
@@ -286,6 +288,7 @@ function createApp(dependencies = {}) {
   app.use('/api/market-trends', marketTrendsRoutes);
   app.use('/api/referrals', referralRoutes);
   app.use('/api/v1/oracles', oracleRoutes(database));
+  app.use('/api/v1/leases/abandoned', createAbandonedAssetRoutes(database, new NotificationService(database)));
   app.use('/api', createPaymentRoutes(database));
   app.use('/api/audit', createAuditRoutes(database));
   
@@ -550,6 +553,13 @@ if (require.main === module) {
         cronExpression: process.env.PAYMENT_TRACKER_CRON || "* * * * *",
       });
       console.log("Payment tracker job started");
+
+      // Abandoned Asset Tracking Job
+      if (config.jobs?.abandonedAssetTrackingEnabled !== false) {
+        const notificationService = new NotificationService(database);
+        startAbandonedAssetTrackingJob(database, notificationService);
+        console.log("Abandoned asset tracking job started");
+      }
 
       reclaimWorker
         .initialize()
