@@ -1,0 +1,48 @@
+{
+  "name": "leaseflow-backend",
+  "version": "1.0.0",
+  "description": "Indexer for LeaseFlow Protocol",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "jest",
+    "load-test:rent-day": "k6 run --vus 100 --duration 30s src/tests/k6/rent-day-stress-test.js",
+    "load-test:rent-day:full": "k6 run --vus 10000 --duration 30m src/tests/k6/rent-day-stress-test.js",
+    "load-test:invoice": "k6 run src/tests/k6/invoice-generation-test.js",
+    "load-test:all": "npm run load-test:rent-day && npm run load-test:invoice"
+  },
+  "dependencies": {
+    "@sentry/node": "^7.91.0",
+    "@stellar/stellar-sdk": "^14.6.1",
+    "algosdk": "^2.0.0",
+    "axios": "^1.13.6",
+    "bullmq": "^5.76.1",
+    "busboy": "^1.6.0",
+    "cors": "^2.8.6",
+    "crypto-js": "^4.2.0",
+    "dotenv": "^17.3.1",
+    "eciesjs": "^0.4.18",
+    "express": "^5.2.1",
+    "express-rate-limit": "^7.1.5",
+    "ioredis": "^5.10.1",
+    "ipfs-http-client": "^60.0.1",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.1.1",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.7",
+    "pdfmake": "^0.2.7",
+    "pg": "^8.11.3",
+    "sharp": "^0.34.5",
+    "socket.io": "^4.7.5",
+    "socket.io-redis-adapter": "^8.3.0",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "ioredis-mock": "^8.13.1",
+    "jest": "^30.3.0",
+    "k6": "^0.0.0",
+    "socket.io-client": "^4.7.5",
+    "supertest": "^7.2.2"
+  }
+}

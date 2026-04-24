@@ -1,0 +1,14 @@
+feat: Implement abandoned asset 30-day countdown tracker - Issue #98
+
+- Add database migration for abandonment tracking fields
+- Implement precise 30-day countdown logic with leap year support
+- Create automated seizure alert system
+- Add live dashboard API endpoints
+- Implement lessee interaction safety mechanisms
+- Add comprehensive test suite with edge cases
+- Include demo script and complete documentation
+
+Acceptance Criteria:
+✅ Lessors have complete visual clarity regarding legal recovery timeline
+✅ Automated alerts remove need for manual blockchain polling
+✅ Lessee interactions accurately interrupt countdown

@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DATABASE_URL=postgresql://leaseflow:password@postgres:5432/leaseflow_db
+      - REDIS_URL=redis://redis:6379
+      - STELLAR_NETWORK=testnet
+      - HORIZON_URL=http://stellar:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  postgres:
+    image: postgres:14-alpine
+    environment:
+      - POSTGRES_USER=leaseflow
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=leaseflow_db
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leaseflow -d leaseflow_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:6-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  stellar:
+    image: stellar/quickstart:testing
+    command: --testnet --enable-soroban-rpc
+    ports:
+      - "8000:8000"
+      - "11626:11626"
+      - "11625:11625"
+    volumes:
+      - stellar_data:/opt/stellar
+
+volumes:
+  postgres_data:
+  stellar_data:

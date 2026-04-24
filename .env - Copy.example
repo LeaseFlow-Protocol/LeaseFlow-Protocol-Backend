@@ -1,0 +1,151 @@
+# Server Config
+PORT=3000
+
+# IPFS Config (Example using Infura)
+IPFS_HOST=ipfs.infura.io
+IPFS_PORT=5001
+IPFS_PROTOCOL=https
+IPFS_PROJECT_ID=your_infura_project_id
+IPFS_PROJECT_SECRET=your_infura_project_secret
+
+# Stellar Config
+CONTRACT_ID=CAEGD57WVTVQSYWYB23AISBW334QO7WNA5XQ56S45GH6BP3D2AVHKUG4
+PORT=3000
+
+# Auth configuration
+AUTH_JWT_SECRET=replace-with-a-long-random-secret
+AUTH_JWT_ISSUER=leaseflow-backend
+AUTH_JWT_AUDIENCE=leaseflow-users
+
+# SQLite persistence
+DATABASE_FILENAME=./data/leaseflow-protocol.sqlite
+
+# Lease renewal job
+LEASE_RENEWAL_JOB_ENABLED=false
+LEASE_RENEWAL_JOB_INTERVAL_MS=86400000
+LEASE_RENEWAL_SCAN_WINDOW_DAYS=0
+
+# Lease archival job (Table Partitioning - Task 2)
+LEASE_ARCHIVAL_JOB_ENABLED=false
+LEASE_ARCHIVAL_CRON=0 2 1 * *
+LEASE_ARCHIVAL_MONTHS=24
+
+# Referral Engine Configuration (Task 4)
+REFERRAL_PROGRAM_ENABLED=true
+REFERRAL_REFERRER_REWARD_MONTHS=1
+REFERRAL_REFEREE_REWARD_MONTHS=1
+REFERRAL_MAX_REFERRALS_PER_USER=10
+REFERRAL_EXPIRY_DAYS=90
+
+# Soroban configuration
+SOROBAN_CONTRACT_ID=CAEGD57WVTVQSYWYB23AISBW334QO7WNA5XQ56S45GH6BP3D2AVHKUG4
+DISCORD_WEBHOOK_URL=your_discord_webhook_url_here
+# Algorand Configuration
+# Algorand Network Configuration
+ALGOD_TOKEN=
+ALGOD_SERVER=https://testnet-api.algonode.cloud
+ALGOD_PORT=443
+
+# PostgreSQL Database Configuration
+DATABASE_URL=postgresql://username:password@localhost:5432/leaseflow_db
+# OR use individual variables:
+# DB_HOST=localhost
+# DB_PORT=5432
+# DB_NAME=leaseflow_db
+# DB_USER=username
+# DB_PASSWORD=password
+
+# Email Configuration (for notifications)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+EMAIL_FROM=your-email@gmail.com
+
+# SMS Configuration (Twilio)
+TWILIO_ACCOUNT_SID=your-twilio-account-sid
+TWILIO_AUTH_TOKEN=your-twilio-auth-token
+TWILIO_PHONE_NUMBER=+1234567890
+
+# Owner Configuration (for auto-reclaim)
+# Owner Account (for executing reclaim transactions)
+OWNER_MNEMONIC=
+
+# Real-Time Rent Payment Tracker (Issue #16)
+# Cron expression for how often to poll Horizon for new payments (default: every minute)
+PAYMENT_TRACKER_CRON=* * * * *
+# Override the Horizon base URL used by the payment tracker (defaults to testnet)
+LEASEFLOW_HORIZON_URL=https://horizon-testnet.stellar.org
+
+# Stellar Anchor KYC Configuration (SEP-12)
+# The endpoint URL for your Stellar Anchor's SEP-12 API
+STELLAR_ANCHOR_URL=https://your-anchor.com/sep12
+# Authentication token/key for the anchor API
+STELLAR_ANCHOR_AUTH_KEY=your-anchor-auth-key
+# Horizon server URL (defaults to mainnet if not specified)
+HORIZON_URL=https://horizon.stellar.org
+
+# Sanctions Screening Configuration
+# Enable/disable sanctions screening worker
+SANCTIONS_SCREENING_ENABLED=true
+# How often to run screening (cron expression) - default every 6 hours
+SANCTIONS_SCREENING_INTERVAL_CRON=0 */6 * * *
+# Cache TTL for sanctions lists in minutes - default 6 hours
+SANCTIONS_CACHE_TTL_MINUTES=360
+# OFAC API URL
+SANCTIONS_OFAC_API_URL=https://api.treasury.gov/ofac/v1/sdn
+# EU Sanctions API URL
+SANCTIONS_EU_API_URL=https://webgate.ec.europa.eu/fsd/fsf/public/files/
+# UK Sanctions API URL
+SANCTIONS_UK_API_URL=https://www.gov.uk/government/publications/the-uk-sanctions-list
+
+# Emergency Eviction Notice Service Configuration
+# Email settings for legal notices (can use same as general email config)
+FROM_EMAIL=noreply@leaseflow.protocol
+
+# Stellar network for on-chain receipts
+STELLAR_NETWORK=testnet
+# For production use: STELLAR_NETWORK=public
+
+# Sentry Error Tracking (Task 2 - Monitoring)
+SENTRY_DSN=https://your-sentry-dsn@sentry.io/your-project-id
+SENTRY_TRACES_SAMPLE_RATE=0.1
+SENTRY_SAMPLE_RATE=1.0
+
+# PDF Lease Generation Configuration (Issue #90)
+# IPFS Provider for PDF storage (pinata, web3storage, local)
+IPFS_PROVIDER=pinata
+
+# Pinata Configuration
+PINATA_API_KEY=your_pinata_api_key
+PINATA_SECRET_KEY=your_pinata_secret_key
+PINATA_GATEWAY=https://gateway.pinata.cloud
+
+# Web3.Storage Configuration
+WEB3_STORAGE_TOKEN=your_web3_storage_token
+WEB3_STORAGE_ENDPOINT=https://api.web3.storage
+
+# Local IPFS Configuration (if using local provider)
+IPFS_HOST=localhost
+IPFS_PORT=5001
+IPFS_PROTOCOL=http
+
+# Redis Configuration (for BullMQ job processing)
+REDIS_HOST=localhost
+REDIS_PORT=6379
+REDIS_PASSWORD=
+REDIS_DB=0
+
+# PDF Generation Job Configuration
+PDF_GENERATION_ENABLED=true
+PDF_GENERATION_CONCURRENCY=2
+PDF_GENERATION_RETRY_ATTEMPTS=3
+PDF_GENERATION_RETRY_DELAY=2000
+
+# Late Fee Job Configuration
+LATE_FEE_JOB_ENABLED=false
+LATE_FEE_JOB_INTERVAL_CRON=0 0 * * *
+
+# Health Monitoring Job Configuration
+HEALTH_MONITOR_ENABLED=false
