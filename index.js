@@ -288,6 +288,11 @@ function createApp(dependencies = {}) {
   const prorationRoutes = require('./src/routes/prorationRoutes');
   app.use('/api/v1', prorationRoutes);
 
+  // MRR (Monthly Recurring Revenue) Aggregator Routes (Issue #101)
+  const { createMrrRoutes } = require('./src/routes/mrrRoutes');
+  const redisClient = app.locals.redis || null;
+  app.use('/api/v1', createMrrRoutes(database, redisClient));
+
   // --- New Feature Routes (v1) ---
   const disputeRoutes = require('./src/routes/disputeRoutes');
   const metadataRoutes = require('./src/routes/metadataRoutes');
