@@ -87,6 +87,15 @@ const { RentDunningSequencer } = require("./src/services/RentDunningSequencer");
 const { AuditService } = require("./src/services/auditService");
 const { createAuditRoutes } = require("./src/routes/auditRoutes");
 
+// DLQ Service for Issue #105
+const { createDlqRoutes } = require("./src/routes/dlqRoutes");
+
+// Row-Level Security Service for Issue #103
+const { RowLevelSecurityService } = require("./src/services/rowLevelSecurityService");
+
+// Reputation Indexer Service for Issue #102
+const { createReputationRoutes } = require("./src/routes/reputationRoutes");
+
 // Redis Service
 const { RedisService } = require("./src/services/redisService");
 
@@ -192,6 +201,10 @@ function createApp(dependencies = {}) {
   // Initialize Redis client (lazy initialization)
   app.locals.redisClient = null; // Will be initialized when needed
 
+  // Initialize Row-Level Security Service
+  const rlsService = new RowLevelSecurityService(database);
+  app.locals.rlsService = rlsService;
+
   // Middleware
   app.use(cors());
   app.use(express.json({ limit: "50mb" }));
@@ -291,6 +304,12 @@ function createApp(dependencies = {}) {
   app.use('/api/v1/leases/abandoned', createAbandonedAssetRoutes(database, new NotificationService(database)));
   app.use('/api', createPaymentRoutes(database));
   app.use('/api/audit', createAuditRoutes(database));
+  
+  // DLQ Admin Routes for Issue #105
+  app.use('/admin/dlq', createDlqRoutes(config));
+  
+  // Reputation Indexer Routes for Issue #102
+  app.use('/api/v1/users', createReputationRoutes(database));
   
   // Proration Calculator Routes (Issue #93)
   const prorationRoutes = require('./src/routes/prorationRoutes');

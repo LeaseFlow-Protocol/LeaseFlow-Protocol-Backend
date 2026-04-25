@@ -43,6 +43,7 @@ class AppDatabase {
         id TEXT PRIMARY KEY,
         landlord_id TEXT NOT NULL,
         tenant_id TEXT NOT NULL,
+        lessor_id TEXT NOT NULL,
         status TEXT NOT NULL,
         rent_amount INTEGER NOT NULL,
         currency TEXT NOT NULL,
@@ -83,6 +84,7 @@ class AppDatabase {
         lease_id TEXT NOT NULL,
         landlord_id TEXT NOT NULL,
         tenant_id TEXT NOT NULL,
+        lessor_id TEXT NOT NULL,
         target_start_date TEXT NOT NULL,
         target_end_date TEXT NOT NULL,
         current_terms_snapshot TEXT NOT NULL,
@@ -162,6 +164,7 @@ class AppDatabase {
         id TEXT PRIMARY KEY,
         lease_id TEXT NOT NULL,
         landlord_id TEXT NOT NULL,
+        lessor_id TEXT NOT NULL,
         utility_type TEXT NOT NULL,
         total_amount INTEGER NOT NULL,
         tenant_share_amount INTEGER NOT NULL,
@@ -174,18 +177,12 @@ class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_utility_bills_lease_cycle
         ON utility_bills (lease_id, next_rent_cycle_date);
 
-      -- Sanctions-related indexes
-      CREATE INDEX IF NOT EXISTS idx_sanctions_violations_lease_id ON sanctions_violations(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_sanctions_violations_address ON sanctions_violations(address);
-      CREATE INDEX IF NOT EXISTS idx_sanctions_violations_status ON sanctions_violations(status);
-      CREATE INDEX IF NOT EXISTS idx_lease_freeze_events_lease_id ON lease_freeze_events(lease_id);
-      CREATE INDEX IF NOT EXISTS idx_sanctions_cache_address ON sanctions_cache(address);
-      CREATE INDEX IF NOT EXISTS idx_sanctions_cache_source ON sanctions_cache(source);
-      CREATE INDEX IF NOT EXISTS idx_sanctions_cache_expires_at ON sanctions_cache(expires_at);
+      -- Note: Sanctions tables would be created separately if needed
 
       CREATE TABLE IF NOT EXISTS maintenance_jobs (
         id TEXT PRIMARY KEY,
         lease_id TEXT NOT NULL,
+        lessor_id TEXT NOT NULL,
         description TEXT NOT NULL,
         contractor_wallet TEXT NOT NULL,
         amount INTEGER NOT NULL,
@@ -228,6 +225,7 @@ class AppDatabase {
         vendor_id TEXT,
         landlord_id TEXT NOT NULL,
         tenant_id TEXT NOT NULL,
+        lessor_id TEXT NOT NULL,
         title TEXT NOT NULL,
         description TEXT NOT NULL,
         category TEXT,
@@ -282,6 +280,7 @@ class AppDatabase {
       CREATE TABLE IF NOT EXISTS rent_payments (
         id TEXT PRIMARY KEY,
         lease_id TEXT NOT NULL,
+        lessor_id TEXT NOT NULL,
         period TEXT NOT NULL,
         due_date TEXT NOT NULL,
         amount_due INTEGER NOT NULL,
@@ -428,6 +427,49 @@ class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_yield_earnings_lessee_pubkey ON yield_earnings_lessee(lessee_pubkey);
       CREATE INDEX IF NOT EXISTS idx_yield_earnings_lessee_harvested_at ON yield_earnings_lessee(harvested_at);
       CREATE INDEX IF NOT EXISTS idx_yield_earnings_lessee_asset ON yield_earnings_lessee(asset_code, asset_issuer);
+
+      -- Dead Letter Queue Tables for Issue #105
+      CREATE TABLE IF NOT EXISTS dlq_events (
+        id TEXT PRIMARY KEY,
+        original_job_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        ledger_number INTEGER NOT NULL,
+        event_payload TEXT NOT NULL,
+        error_message TEXT NOT NULL,
+        error_stack TEXT,
+        failed_at TEXT NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 3,
+        status TEXT NOT NULL DEFAULT 'failed',
+        retried_at TEXT,
+        resolved_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_dlq_events_event_type ON dlq_events(event_type);
+      CREATE INDEX IF NOT EXISTS idx_dlq_events_ledger_number ON dlq_events(ledger_number);
+      CREATE INDEX IF NOT EXISTS idx_dlq_events_status ON dlq_events(status);
+      CREATE INDEX IF NOT EXISTS idx_dlq_events_failed_at ON dlq_events(failed_at);
+
+      CREATE TABLE IF NOT EXISTS ingestion_ledger_tracking (
+        id TEXT PRIMARY KEY DEFAULT 'main',
+        last_ingested_ledger INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS dlq_audit_log (
+        id TEXT PRIMARY KEY,
+        dlq_event_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        performed_by TEXT,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (dlq_event_id) REFERENCES dlq_events(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_dlq_audit_log_event_id ON dlq_audit_log(dlq_event_id);
+      CREATE INDEX IF NOT EXISTS idx_dlq_audit_log_action ON dlq_audit_log(action);
+      CREATE INDEX IF NOT EXISTS idx_dlq_audit_log_created_at ON dlq_audit_log(created_at);
     `);
   }
 
@@ -1889,6 +1931,194 @@ class AppDatabase {
         total_stroops: (lessorSum?.total_stroops || 0) + (lesseeSum?.total_stroops || 0),
         total_decimal: (lessorSum?.total_decimal || 0) + (lesseeSum?.total_decimal || 0)
       }
+    };
+  }
+
+  // DLQ Methods for Issue #105
+
+  /**
+   * Insert a failed event into the DLQ
+   */
+  insertDlqEvent(dlqEvent) {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(`
+        INSERT INTO dlq_events (
+          id, original_job_id, event_type, ledger_number, event_payload,
+          error_message, error_stack, failed_at, retry_count, status,
+          created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        dlqEvent.id || crypto.randomUUID(),
+        dlqEvent.originalJobId,
+        dlqEvent.eventType,
+        dlqEvent.ledgerNumber,
+        JSON.stringify(dlqEvent.eventPayload),
+        dlqEvent.errorMessage,
+        dlqEvent.errorStack,
+        dlqEvent.failedAt || now,
+        dlqEvent.retryCount || 3,
+        dlqEvent.status || 'failed',
+        now,
+        now
+      );
+  }
+
+  /**
+   * Get DLQ events with optional filtering
+   */
+  getDlqEvents(options = {}) {
+    const { eventType, status, limit = 50, offset = 0 } = options;
+    
+    let query = `
+      SELECT 
+        id, original_job_id AS originalJobId, event_type AS eventType,
+        ledger_number AS ledgerNumber, event_payload, error_message AS errorMessage,
+        error_stack AS errorStack, failed_at AS failedAt, retry_count AS retryCount,
+        status, retried_at AS retriedAt, resolved_at AS resolvedAt,
+        created_at AS createdAt, updated_at AS updatedAt
+      FROM dlq_events
+    `;
+    
+    const conditions = [];
+    const params = [];
+    
+    if (eventType) {
+      conditions.push('event_type = ?');
+      params.push(eventType);
+    }
+    
+    if (status) {
+      conditions.push('status = ?');
+      params.push(status);
+    }
+    
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    
+    query += ' ORDER BY failed_at DESC LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    
+    const rows = this.db.prepare(query).all(...params);
+    
+    return rows.map(row => ({
+      ...row,
+      eventPayload: JSON.parse(row.eventPayload)
+    }));
+  }
+
+  /**
+   * Update DLQ event status
+   */
+  updateDlqEventStatus(eventId, status, additionalData = {}) {
+    const now = new Date().toISOString();
+    const updateFields = ['status = ?', 'updated_at = ?'];
+    const params = [status, now];
+    
+    if (status === 'retried') {
+      updateFields.push('retried_at = ?');
+      params.push(now);
+    }
+    
+    if (status === 'resolved') {
+      updateFields.push('resolved_at = ?');
+      params.push(now);
+    }
+    
+    params.push(eventId);
+    
+    this.db
+      .prepare(`UPDATE dlq_events SET ${updateFields.join(', ')} WHERE id = ?`)
+      .run(...params);
+  }
+
+  /**
+   * Get last ingested ledger number
+   */
+  getLastIngestedLedger() {
+    const row = this.db
+      .prepare('SELECT last_ingested_ledger FROM ingestion_ledger_tracking WHERE id = ?')
+      .get('main');
+    
+    return row ? row.last_ingested_ledger : 0;
+  }
+
+  /**
+   * Update last ingested ledger number
+   */
+  updateLastIngestedLedger(ledgerNumber) {
+    const now = new Date().toISOString();
+    
+    this.db
+      .prepare(`
+        INSERT INTO ingestion_ledger_tracking (id, last_ingested_ledger, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          last_ingested_ledger = excluded.last_ingested_ledger,
+          updated_at = excluded.updated_at
+      `)
+      .run('main', ledgerNumber, now);
+  }
+
+  /**
+   * Insert audit log entry for DLQ actions
+   */
+  insertDlqAuditLog(auditEntry) {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(`
+        INSERT INTO dlq_audit_log (
+          id, dlq_event_id, action, performed_by, notes, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        auditEntry.id || crypto.randomUUID(),
+        auditEntry.dlqEventId,
+        auditEntry.action,
+        auditEntry.performedBy,
+        auditEntry.notes,
+        now
+      );
+  }
+
+  /**
+   * Get DLQ statistics
+   */
+  getDlqStats() {
+    const stats = this.db
+      .prepare(`
+        SELECT 
+          event_type,
+          COUNT(*) as count,
+          MAX(failed_at) as last_failure
+        FROM dlq_events
+        GROUP BY event_type
+        ORDER BY count DESC
+      `)
+      .all();
+    
+    const totalFailed = this.db
+      .prepare('SELECT COUNT(*) as count FROM dlq_events WHERE status = ?')
+      .get('failed');
+    
+    const totalRetried = this.db
+      .prepare('SELECT COUNT(*) as count FROM dlq_events WHERE status = ?')
+      .get('retried');
+    
+    const totalResolved = this.db
+      .prepare('SELECT COUNT(*) as count FROM dlq_events WHERE status = ?')
+      .get('resolved');
+    
+    return {
+      byEventType: stats,
+      totalFailed: totalFailed.count,
+      totalRetried: totalRetried.count,
+      totalResolved: totalResolved.count,
+      lastIngestedLedger: this.getLastIngestedLedger()
     };
   }
 }

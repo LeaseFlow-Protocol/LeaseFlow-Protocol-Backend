@@ -3,22 +3,33 @@ import { logLeaseEvent } from '../services/loggerService.js';
 import hierarchyService from '../services/LeaseHierarchyService.js';
 import metadataService from '../services/NftMetadataService.js';
 import { YieldService } from '../services/yieldService.js';
+import { DlqService } from '../services/dlqService.js';
+import { loadConfig } from '../config.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const server = new SorobanRpc.Server(process.env.RPC_URL || 'https://soroban-testnet.stellar.org');
 const CONTRACT_ID = process.env.LEASE_FLOW_CONTRACT_ADDRESS;
+const config = loadConfig();
+
+// Initialize DLQ service
+const dlqService = new DlqService(config);
 
 /**
- * Fetches and logs recent contract events
+ * Fetches and logs recent contract events with DLQ integration
  */
 export async function pollLeaseEvents() {
     try {
         console.log("🔍 Scanning for LeaseFlow events...");
         
+        // Get last ingested ledger from database
+        const { AppDatabase } = await import('../db/appDatabase.js');
+        const database = new AppDatabase(process.env.DB_PATH || './leases.db');
+        const lastLedger = database.getLastIngestedLedger();
+        
         const response = await server.getEvents({
-            startLedger: 0, // In a real app, store the last ledger seen in your DB
+            startLedger: lastLedger + 1, // Start from next ledger after last ingested
             filters: [{
                 type: "contract",
                 contractIds: [CONTRACT_ID]
@@ -26,98 +37,69 @@ export async function pollLeaseEvents() {
         });
 
         if (response.results.length === 0) {
-            console.log("ℹ️ No new events found.");
+            console.log(`ℹ️ No new events found since ledger ${lastLedger}.`);
             return;
         }
 
         await hierarchyService.initialize();
+        await dlqService.initialize();
 
-        response.results.forEach(async (event) => {
+        // Process events through DLQ for reliability
+        for (const event of response.results) {
             const topics = event.topic.map(t => t.toString());
-            
-            // Existing LeaseStarted logic
+            let eventType = null;
+            let eventData = null;
+
+            // Determine event type and extract data
             if (topics.some(t => t.includes('LeaseStarted'))) {
-                logLeaseEvent('LeaseStarted Event Captured', {
-                    contractAddress: event.contractId,
-                    txHash: event.txHash,
-                    ledger: event.ledger,
-                    rawData: event.value
-                });
-                
-                const eventData = parseEventValue(event.value);
-                if (eventData.lease_id) {
-                    await metadataService.invalidateCache(CONTRACT_ID, eventData.lease_id);
-                }
+                eventType = 'LeaseStarted';
+                eventData = parseEventValue(event.value);
+            } else if (topics.some(t => t.includes('SubleaseCreated'))) {
+                eventType = 'SubleaseCreated';
+                eventData = parseEventValue(event.value);
+            } else if (topics.some(t => t.includes('DerivedHierarchyBurned'))) {
+                eventType = 'DerivedHierarchyBurned';
+                eventData = parseEventValue(event.value);
+            } else if (topics.some(t => t.includes('EscrowYieldHarvested'))) {
+                eventType = 'EscrowYieldHarvested';
+                eventData = parseEventValue(event.value);
             }
 
-            // New SubleaseCreated logic
-            if (topics.some(t => t.includes('SubleaseCreated'))) {
-                const eventData = parseEventValue(event.value); // Helper to parse XDR/JSON
-                await hierarchyService.handleSubleaseCreated({
-                    leaseId: eventData.lease_id,
-                    parentLeaseId: eventData.parent_id,
-                    tenantId: eventData.tenant,
-                    landlordId: eventData.landlord,
-                    rentAmount: eventData.rent,
-                    currency: eventData.currency,
-                    startDate: eventData.start,
-                    endDate: eventData.end
-                });
-                await metadataService.invalidateCache(CONTRACT_ID, eventData.lease_id);
-            }
-
-            // New DerivedHierarchyBurned logic
-            if (topics.some(t => t.includes('DerivedHierarchyBurned'))) {
-                const eventData = parseEventValue(event.value);
-                await hierarchyService.handleDerivedHierarchyBurned(eventData.root_lease_id);
-                // Invalidate all? For now just root
-                await metadataService.invalidateCache(CONTRACT_ID, eventData.root_lease_id);
-            }
-
-            // New EscrowYieldHarvested logic (Issue #99)
-            if (topics.some(t => t.includes('EscrowYieldHarvested'))) {
-                const eventData = parseEventValue(event.value);
-                console.log('[EventPoller] Processing EscrowYieldHarvested event:', eventData);
-                
-                try {
-                    // Initialize YieldService
-                    const { AppDatabase } = await import('../db/appDatabase.js');
-                    const database = new AppDatabase(process.env.DB_PATH || './leases.db');
-                    const yieldService = new YieldService(database);
-                    
-                    // Process the yield harvest event
-                    const result = await yieldService.processYieldHarvestEvent({
-                        lease_id: eventData.lease_id,
-                        harvest_tx_hash: event.txHash,
-                        asset_code: eventData.asset_code || 'XLM',
-                        asset_issuer: eventData.asset_issuer || null,
-                        total_yield_stroops: eventData.total_yield_stroops,
-                        lessor_pubkey: eventData.lessor_pubkey,
-                        lessee_pubkey: eventData.lessee_pubkey,
-                        harvested_at: new Date(event.timestamp || Date.now()).toISOString()
-                    });
-                    
-                    logLeaseEvent('EscrowYieldHarvested Processed', {
-                        leaseId: eventData.lease_id,
+            if (eventType && eventData) {
+                // Add event to DLQ for processing
+                await dlqService.addEvent({
+                    eventPayload: {
+                        ...eventData,
                         txHash: event.txHash,
-                        totalProcessed: result.totalProcessed,
-                        lessorEarnings: result.lessorEarnings.id,
-                        lesseeEarnings: result.lesseeEarnings.id
-                    });
-                    
-                } catch (error) {
-                    console.error('[EventPoller] Error processing EscrowYieldHarvested:', error);
-                    logLeaseEvent('EscrowYieldHarvested Error', {
-                        leaseId: eventData.lease_id,
-                        txHash: event.txHash,
-                        error: error.message
-                    });
-                }
+                        contractId: event.contractId,
+                        timestamp: event.timestamp
+                    },
+                    ledgerNumber: event.ledger,
+                    eventType: eventType
+                });
+
+                console.log(`[EventPoller] Queued ${eventType} event from ledger ${event.ledger} for processing`);
             }
-        });
+        }
+
+        // Update last ingested ledger to the highest ledger we've seen
+        const maxLedger = Math.max(...response.results.map(e => e.ledger));
+        database.updateLastIngestedLedger(maxLedger);
+        console.log(`[EventPoller] Updated last ingested ledger to ${maxLedger}`);
 
     } catch (error) {
-        console.error(" Poller Error:", error.message);
+        console.error("[EventPoller] Poller Error:", error);
+        
+        // In case of critical errors, still try to advance ledger to prevent infinite loops
+        try {
+            const { AppDatabase } = await import('../db/appDatabase.js');
+            const database = new AppDatabase(process.env.DB_PATH || './leases.db');
+            const currentLedger = database.getLastIngestedLedger();
+            database.updateLastIngestedLedger(currentLedger + 1);
+            console.log(`[EventPoller] Emergency ledger advancement to ${currentLedger + 1}`);
+        } catch (dbError) {
+            console.error("[EventPoller] Failed to advance ledger:", dbError);
+        }
     }
 }
 
