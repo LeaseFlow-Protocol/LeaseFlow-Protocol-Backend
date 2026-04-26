@@ -99,6 +99,12 @@ const { createReputationRoutes } = require("./src/routes/reputationRoutes");
 // Redis Service
 const { RedisService } = require("./src/services/redisService");
 
+// Health Service for Kubernetes Probes (#116)
+const { createHealthRoutes } = require("./src/routes/healthRoutes");
+
+// GraphQL Server Setup (#106)
+const { initializeGraphQL } = require("./src/graphql/server");
+
 /**
  * Build authentication middleware for landlords and tenants.
  *
@@ -205,6 +211,10 @@ function createApp(dependencies = {}) {
   const rlsService = new RowLevelSecurityService(database);
   app.locals.rlsService = rlsService;
 
+  // Initialize GraphQL Server
+  const graphqlDependencies = { database, redisService, config, rlsService };
+  app.locals.graphqlDependencies = graphqlDependencies;
+
   // Middleware
   app.use(cors());
   app.use(express.json({ limit: "50mb" }));
@@ -310,6 +320,9 @@ function createApp(dependencies = {}) {
   
   // Reputation Indexer Routes for Issue #102
   app.use('/api/v1/users', createReputationRoutes(database));
+  
+  // Kubernetes Health Probe Routes (#116)
+  app.use('/health', createHealthRoutes(database, redisService, config));
   
   // Proration Calculator Routes (Issue #93)
   const prorationRoutes = require('./src/routes/prorationRoutes');
@@ -508,6 +521,25 @@ if (require.main === module) {
   const config = loadConfig();
   const app = createApp({ config });
   const port = config.port || 3000;
+
+  // Initialize GraphQL Server
+  initializeGraphQL(app, app.locals.graphqlDependencies)
+    .then(({ apolloServer, subscriptionServer, subscriptionManager, publishers }) => {
+      console.log('GraphQL server initialized successfully');
+      app.locals.apolloServer = apolloServer;
+      app.locals.subscriptionServer = subscriptionServer;
+      app.locals.subscriptionManager = subscriptionManager;
+      app.locals.publishers = publishers;
+      
+      // Initialize subscription manager
+      return subscriptionManager.initialize();
+    })
+    .then(() => {
+      console.log('GraphQL subscription system initialized');
+    })
+    .catch(error => {
+      console.error('Failed to initialize GraphQL server:', error);
+    });
 
   // Initialize Background Services
   const database = app.locals.database;

@@ -1,0 +1,620 @@
+# GraphQL Schema for LeaseFlow Protocol Backend
+# Defines types for Lessor, Lessee, Lease, Asset, and ConditionReport entities
+
+# Custom scalar types for Soroban integration
+scalar Stroops
+scalar Timestamp
+scalar JSON
+
+# Core Actor Types
+type Actor {
+  id: ID!
+  publicKey: String!
+  role: ActorRole!
+  stellarAddress: String
+  kycStatus: KYCStatus
+  sanctionsStatus: SanctionsStatus
+  createdAt: Timestamp!
+  updatedAt: Timestamp!
+}
+
+enum ActorRole {
+  LESSOR
+  LESSEE
+  LANDLORD
+  TENANT
+  VENDOR
+}
+
+enum KYCStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SanctionsStatus {
+  CLEAN
+  FLAGGED
+  VIOLATION
+}
+
+# Asset Types
+type Asset {
+  id: ID!
+  lessorId: ID!
+  type: AssetType!
+  address: String!
+  metadata: JSON
+  status: AssetStatus!
+  conditionReports: [ConditionReport!]!
+  createdAt: Timestamp!
+  updatedAt: Timestamp!
+}
+
+enum AssetType {
+  RESIDENTIAL_PROPERTY
+  COMMERCIAL_PROPERTY
+  VEHICLE
+  EQUIPMENT
+  REAL_WORLD_ASSET
+}
+
+enum AssetStatus {
+  AVAILABLE
+  LEASED
+  MAINTENANCE
+  UNAVAILABLE
+}
+
+# Condition Report Types
+type ConditionReport {
+  id: ID!
+  leaseId: ID!
+  assetId: ID!
+  reportData: JSON!
+  severityTier: SeverityTier
+  slashAmount: Float
+  oracleSignature: String
+  s3Url: String
+  status: ReportStatus!
+  createdAt: Timestamp!
+}
+
+enum SeverityTier {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ReportStatus {
+  SUBMITTED
+  VERIFIED
+  REJECTED
+  PROCESSED
+}
+
+# Lease Types
+type Lease {
+  id: ID!
+  landlordId: ID!
+  tenantId: ID!
+  lessorId: ID!
+  asset: Asset!
+  status: LeaseStatus!
+  rentAmount: Stroops!
+  currency: String!
+  startDate: Timestamp!
+  endDate: Timestamp!
+  renewable: Boolean!
+  disputed: Boolean!
+  paymentStatus: PaymentStatus!
+  lastPaymentAt: Timestamp
+  tenantAccountId: String
+  landlordStellarAddress: String
+  tenantStellarAddress: String
+  sanctionsStatus: SanctionsStatus!
+  sanctionsCheckAt: Timestamp
+  sanctionsViolationCount: Int!
+  parentLeaseId: ID
+  subleases: [Lease!]!
+  conditionReports: [ConditionReport!]!
+  renewalProposals: [RenewalProposal!]!
+  paymentHistory: [PaymentHistory!]!
+  rentPayments: [RentPayment!]!
+  createdAt: Timestamp!
+  updatedAt: Timestamp!
+}
+
+enum LeaseStatus {
+  DRAFT
+  ACTIVE
+  EXPIRED
+  TERMINATED
+  SUSPENDED
+  RENEWED
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  OVERDUE
+  PARTIAL
+  DEFAULT
+}
+
+# Renewal Proposal Types
+type RenewalProposal {
+  id: ID!
+  leaseId: ID!
+  landlordId: ID!
+  tenantId: ID!
+  lessorId: ID!
+  targetStartDate: Timestamp!
+  targetEndDate: Timestamp!
+  currentTermsSnapshot: JSON!
+  proposedTerms: JSON!
+  ruleApplied: JSON!
+  status: ProposalStatus!
+  landlordAcceptedAt: Timestamp
+  tenantAcceptedAt: Timestamp
+  rejectedBy: ActorRole
+  createdAt: Timestamp!
+  updatedAt: Timestamp!
+  expiresAt: Timestamp!
+  sorobanContractStatus: SorobanContractStatus!
+  sorobanContractReference: JSON
+}
+
+enum ProposalStatus {
+  PENDING
+  LANDLORD_ACCEPTED
+  TENANT_ACCEPTED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  EXECUTED
+}
+
+enum SorobanContractStatus {
+  PENDING
+  DEPLOYED
+  EXECUTED
+  FAILED
+}
+
+# Payment Types
+type PaymentHistory {
+  id: ID!
+  horizonOpId: String!
+  leaseId: ID!
+  tenantAccountId: String!
+  amount: String!
+  assetCode: String!
+  assetIssuer: String
+  transactionHash: String!
+  paidAt: Timestamp!
+  recordedAt: Timestamp!
+}
+
+type RentPayment {
+  id: ID!
+  leaseId: ID!
+  lessorId: ID!
+  period: String!
+  dueDate: Timestamp!
+  amountDue: Stroops!
+  amountPaid: Stroops!
+  protocolFee: Stroops!
+  datePaid: Timestamp
+  status: PaymentStatus!
+  createdAt: Timestamp!
+  updatedAt: Timestamp!
+}
+
+# Yield Earnings Types
+type YieldEarnings {
+  id: ID!
+  leaseId: ID!
+  pubkey: String!
+  harvestTxHash: String!
+  assetCode: String!
+  assetIssuer: String
+  amountStroops: Stroops!
+  amountDecimal: Float!
+  fiatEquivalent: Float
+  fiatCurrency: String
+  priceAtHarvest: Float
+  harvestedAt: Timestamp!
+  recordedAt: Timestamp!
+}
+
+# Maintenance Types
+type MaintenanceTicket {
+  id: ID!
+  leaseId: ID!
+  vendorId: ID
+  landlordId: ID!
+  tenantId: ID!
+  lessorId: ID!
+  title: String!
+  description: String!
+  category: String
+  priority: Priority!
+  status: TicketStatus!
+  photos: [String!]
+  repairPhotos: [String!]
+  notes: String
+  tenantNotes: String
+  openedAt: Timestamp
+  inProgressAt: Timestamp
+  resolvedAt: Timestamp
+  closedAt: Timestamp
+  createdAt: Timestamp!
+  updatedAt: Timestamp!
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+  CANCELLED
+}
+
+# Vendor Types
+type Vendor {
+  id: ID!
+  name: String!
+  email: String!
+  phone: String
+  companyName: String
+  licenseNumber: String
+  specialties: [String!]
+  kycStatus: KYCStatus!
+  stellarAccountId: String
+  createdAt: Timestamp!
+  updatedAt: Timestamp!
+}
+
+# Utility Bill Types
+type UtilityBill {
+  id: ID!
+  leaseId: ID!
+  landlordId: ID!
+  lessorId: ID!
+  utilityType: String!
+  totalAmount: Stroops!
+  tenantShareAmount: Stroops!
+  billingPeriodStart: Timestamp
+  billingPeriodEnd: Timestamp
+  nextRentCycleDate: Timestamp!
+  uploadedAt: Timestamp!
+}
+
+# IoT Event Types
+type IoTEvent {
+  id: ID!
+  leaseId: ID!
+  assetId: ID!
+  eventType: String!
+  payload: JSON!
+  status: EventStatus!
+  retryCount: Int!
+  errorMessage: String
+  dispatchedAt: Timestamp!
+  createdAt: Timestamp!
+}
+
+enum EventStatus {
+  DISPATCHED
+  PROCESSED
+  FAILED
+  RETRYING
+}
+
+# Query Operations
+type Query {
+  # Actor queries
+  actor(id: ID!): Actor
+  actors(role: ActorRole, limit: Int, offset: Int): [Actor!]!
+  me: Actor
+  
+  # Asset queries
+  asset(id: ID!): Asset
+  assets(lessorId: ID, type: AssetType, status: AssetStatus, limit: Int, offset: Int): [Asset!]!
+  
+  # Lease queries
+  lease(id: ID!): Lease
+  leases(
+    landlordId: ID
+    tenantId: ID
+    lessorId: ID
+    status: LeaseStatus
+    renewable: Boolean
+    limit: Int
+    offset: Int
+  ): [Lease!]!
+  
+  # Lease hierarchy queries
+  leaseHierarchy(leaseId: ID!): Lease!
+  subleases(parentLeaseId: ID!): [Lease!]!
+  
+  # Condition report queries
+  conditionReport(id: ID!): ConditionReport
+  conditionReports(
+    leaseId: ID
+    assetId: ID
+    status: ReportStatus
+    severityTier: SeverityTier
+    limit: Int
+    offset: Int
+  ): [ConditionReport!]!
+  
+  # Renewal proposal queries
+  renewalProposal(id: ID!): RenewalProposal
+  renewalProposals(
+    leaseId: ID
+    landlordId: ID
+    tenantId: ID
+    status: ProposalStatus
+    limit: Int
+    offset: Int
+  ): [RenewalProposal!]!
+  
+  # Payment queries
+  paymentHistory(leaseId: ID, tenantAccountId: String, limit: Int, offset: Int): [PaymentHistory!]!
+  rentPayments(leaseId: ID, status: PaymentStatus, limit: Int, offset: Int): [RentPayment!]!
+  
+  # Yield earnings queries
+  yieldEarnings(
+    leaseId: ID
+    pubkey: String
+    assetCode: String
+    harvestedAfter: Timestamp
+    harvestedBefore: Timestamp
+    limit: Int
+    offset: Int
+  ): [YieldEarnings!]!
+  
+  # Maintenance queries
+  maintenanceTicket(id: ID!): MaintenanceTicket
+  maintenanceTickets(
+    leaseId: ID
+    vendorId: ID
+    status: TicketStatus
+    priority: Priority
+    limit: Int
+    offset: Int
+  ): [MaintenanceTicket!]!
+  
+  # Vendor queries
+  vendor(id: ID!): Vendor
+  vendors(kycStatus: KYCStatus, specialties: [String!], limit: Int, offset: Int): [Vendor!]!
+  
+  # Utility bill queries
+  utilityBill(id: ID!): UtilityBill
+  utilityBills(
+    leaseId: ID
+    landlordId: ID
+    utilityType: String
+    billingPeriod: String
+    limit: Int
+    offset: Int
+  ): [UtilityBill!]!
+  
+  # IoT event queries
+  iotEvent(id: ID!): IoTEvent
+  iotEvents(
+    leaseId: ID
+    assetId: ID
+    eventType: String
+    status: EventStatus
+    limit: Int
+    offset: Int
+  ): [IoTEvent!]!
+}
+
+# Mutation Operations
+type Mutation {
+  # Lease mutations
+  createLease(input: CreateLeaseInput!): Lease!
+  updateLease(id: ID!, input: UpdateLeaseInput!): Lease!
+  terminateLease(id: ID!, reason: String): Lease!
+  
+  # Renewal proposal mutations
+  createRenewalProposal(input: CreateRenewalProposalInput!): RenewalProposal!
+  acceptRenewalProposal(id: ID!): RenewalProposal!
+  rejectRenewalProposal(id: ID!, reason: String): RenewalProposal!
+  
+  # Condition report mutations
+  createConditionReport(input: CreateConditionReportInput!): ConditionReport!
+  updateConditionReport(id: ID!, input: UpdateConditionReportInput!): ConditionReport!
+  
+  # Payment mutations
+  recordPayment(input: RecordPaymentInput!): PaymentHistory!
+  updateRentPayment(id: ID!, input: UpdateRentPaymentInput!): RentPayment!
+  
+  # Maintenance mutations
+  createMaintenanceTicket(input: CreateMaintenanceTicketInput!): MaintenanceTicket!
+  updateMaintenanceTicket(id: ID!, input: UpdateMaintenanceTicketInput!): MaintenanceTicket!
+  assignVendor(ticketId: ID!, vendorId: ID!): MaintenanceTicket!
+  
+  # Vendor mutations
+  createVendor(input: CreateVendorInput!): Vendor!
+  updateVendor(id: ID!, input: UpdateVendorInput!): Vendor!
+  
+  # Utility bill mutations
+  createUtilityBill(input: CreateUtilityBillInput!): UtilityBill!
+  updateUtilityBill(id: ID!, input: UpdateUtilityBillInput!): UtilityBill!
+  
+  # Asset mutations
+  createAsset(input: CreateAssetInput!): Asset!
+  updateAsset(id: ID!, input: UpdateAssetInput!): Asset!
+}
+
+# Subscription Operations
+type Subscription {
+  # Real-time lease updates
+  onLeaseStatusChanged(leaseId: ID): Lease!
+  onLeaseCreated(landlordId: ID): Lease!
+  onLeaseTerminated(tenantId: ID): Lease!
+  
+  # Real-time asset updates
+  onAssetUnlocked(assetId: ID): Asset!
+  onAssetConditionChanged(assetId: ID): Asset!
+  
+  # Real-time condition report updates
+  onConditionReportSubmitted(leaseId: ID): ConditionReport!
+  onConditionReportVerified(assetId: ID): ConditionReport!
+  
+  # Real-time payment updates
+  onPaymentReceived(leaseId: ID): PaymentHistory!
+  onPaymentOverdue(landlordId: ID): RentPayment!
+  
+  # Real-time maintenance updates
+  onMaintenanceTicketCreated(landlordId: ID): MaintenanceTicket!
+  onMaintenanceTicketUpdated(vendorId: ID): MaintenanceTicket!
+  
+  # Real-time IoT events
+  onIoTEvent(leaseId: ID): IoTEvent!
+  onAssetHealthChanged(lessorId: ID): IoTEvent!
+}
+
+# Input Types
+input CreateLeaseInput {
+  landlordId: ID!
+  tenantId: ID!
+  lessorId: ID!
+  assetId: ID!
+  rentAmount: Stroops!
+  currency: String!
+  startDate: Timestamp!
+  endDate: Timestamp!
+  renewable: Boolean = true
+}
+
+input UpdateLeaseInput {
+  status: LeaseStatus
+  renewable: Boolean
+  disputed: Boolean
+  paymentStatus: PaymentStatus
+  tenantAccountId: String
+  landlordStellarAddress: String
+  tenantStellarAddress: String
+}
+
+input CreateRenewalProposalInput {
+  leaseId: ID!
+  targetStartDate: Timestamp!
+  targetEndDate: Timestamp!
+  proposedTerms: JSON!
+}
+
+input CreateConditionReportInput {
+  leaseId: ID!
+  assetId: ID!
+  reportData: JSON!
+  severityTier: SeverityTier
+  photos: [String!]
+}
+
+input UpdateConditionReportInput {
+  status: ReportStatus
+  severityTier: SeverityTier
+  slashAmount: Float
+  oracleSignature: String
+  s3Url: String
+}
+
+input RecordPaymentInput {
+  leaseId: ID!
+  tenantAccountId: String!
+  amount: String!
+  assetCode: String!
+  assetIssuer: String
+  transactionHash: String!
+  paidAt: Timestamp!
+}
+
+input UpdateRentPaymentInput {
+  amountPaid: Stroops
+  datePaid: Timestamp
+  status: PaymentStatus
+}
+
+input CreateMaintenanceTicketInput {
+  leaseId: ID!
+  title: String!
+  description: String!
+  category: String
+  priority: Priority = MEDIUM
+  photos: [String!]
+  notes: String
+}
+
+input UpdateMaintenanceTicketInput {
+  status: TicketStatus
+  priority: Priority
+  notes: String
+  repairPhotos: [String!]
+  resolvedAt: Timestamp
+}
+
+input CreateVendorInput {
+  name: String!
+  email: String!
+  phone: String
+  companyName: String
+  licenseNumber: String
+  specialties: [String!]
+  stellarAccountId: String
+}
+
+input UpdateVendorInput {
+  name: String
+  phone: String
+  companyName: String
+  licenseNumber: String
+  specialties: [String!]
+  stellarAccountId: String
+  kycStatus: KYCStatus
+}
+
+input CreateUtilityBillInput {
+  leaseId: ID!
+  utilityType: String!
+  totalAmount: Stroops!
+  tenantShareAmount: Stroops!
+  billingPeriodStart: Timestamp
+  billingPeriodEnd: Timestamp
+  nextRentCycleDate: Timestamp!
+}
+
+input UpdateUtilityBillInput {
+  totalAmount: Stroops
+  tenantShareAmount: Stroops
+  billingPeriodStart: Timestamp
+  billingPeriodEnd: Timestamp
+}
+
+input CreateAssetInput {
+  lessorId: ID!
+  type: AssetType!
+  address: String!
+  metadata: JSON
+}
+
+input UpdateAssetInput {
+  type: AssetType
+  address: String
+  metadata: JSON
+  status: AssetStatus
+}
