@@ -1,0 +1,224 @@
+# Vault Kubernetes Authentication Configuration
+# This configuration sets up Vault to authenticate Kubernetes pods using their ServiceAccount tokens
+# Apply with: kubectl apply -f k8s/vault-k8s-auth-config.yaml
+
+---
+# ServiceAccount for Vault authentication
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: leaseflow-backend
+  namespace: leaseflow
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/leaseflow-vault-role  # For EKS
+
+---
+# Role for Vault authentication
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vault-auth-reader
+  namespace: leaseflow
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+
+---
+# RoleBinding for Vault authentication
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vault-auth-reader-binding
+  namespace: leaseflow
+subjects:
+  - kind: ServiceAccount
+    name: leaseflow-backend
+    namespace: leaseflow
+roleRef:
+  kind: Role
+  name: vault-auth-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ClusterRole for Vault authentication (if needed cluster-wide)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: vault-authenticator
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+
+---
+# ClusterRoleBinding for Vault authentication
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault-authenticator-binding
+subjects:
+  - kind: ServiceAccount
+    name: leaseflow-backend
+    namespace: leaseflow
+roleRef:
+  kind: ClusterRole
+  name: vault-authenticator
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Vault Agent ConfigMap for Kubernetes authentication
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-agent-config
+  namespace: leaseflow
+data:
+  config.hcl: |
+    pid_file = "/tmp/vault-agent.pid"
+    
+    auto_auth {
+      method "kubernetes" {
+        mount_path = "auth/kubernetes"
+        config = {
+          role = "leaseflow-backend"
+        }
+      }
+      
+      sink "file" {
+        config = {
+          path = "/home/vault/.vault-token"
+        }
+      }
+    }
+    
+    listener "tcp" {
+      address = "127.0.0.1:8200"
+      tls_disable = true
+    }
+
+---
+# Vault Agent Template ConfigMap for secret injection
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-templates
+  namespace: leaseflow
+data:
+  # Database credentials template
+  database-credentials.tpl: |
+    {{- with secret "database/creds/leaseflow-backend" -}}
+    export DB_HOST="{{ .Data.data.host }}"
+    export DB_PORT="{{ .Data.data.port }}"
+    export DB_NAME="{{ .Data.data.dbname }}"
+    export DB_USER="{{ .Data.data.username }}"
+    export DB_PASSWORD="{{ .Data.data.password }}"
+    {{- end }}
+  
+  # JWT secret template
+  jwt-secret.tpl: |
+    {{- with secret "secret/data/leaseflow/jwt" -}}
+    export JWT_SECRET="{{ .Data.data.secret }}"
+    export JWT_ISSUER="{{ .Data.data.issuer | default "leaseflow-backend" }}"
+    export JWT_AUDIENCE="{{ .Data.data.audience | default "leaseflow-users" }}"
+    {{- end }}
+  
+  # Redis credentials template
+  redis-credentials.tpl: |
+    {{- with secret "secret/data/leaseflow/redis" -}}
+    export REDIS_HOST="{{ .Data.data.host }}"
+    export REDIS_PORT="{{ .Data.data.port }}"
+    export REDIS_PASSWORD="{{ .Data.data.password }}"
+    {{- end }}
+  
+  # Stellar/Soroban configuration template
+  stellar-config.tpl: |
+    {{- with secret "secret/data/leaseflow/stellar" -}}
+    export STELLAR_NETWORK_PASSPHRASE="{{ .Data.data.network_passphrase }}"
+    export SOROBAN_NETWORK_URL="{{ .Data.data.soroban_url }}"
+    export STELLAR_SECRET="{{ .Data.data.secret | default "" }}"
+    {{- end }}
+  
+  # SendGrid API key template
+  sendgrid-config.tpl: |
+    {{- with secret "secret/data/leaseflow/sendgrid" -}}
+    export SENDGRID_API_KEY="{{ .Data.data.api_key }}"
+    export SENDGRID_FROM_EMAIL="{{ .Data.data.from_email }}"
+    {{- end }}
+  
+  # Sentry DSN template
+  sentry-config.tpl: |
+    {{- with secret "secret/data/leaseflow/sentry" -}}
+    export SENTRY_DSN="{{ .Data.data.dsn }}"
+    export SENTRY_TRACES_SAMPLE_RATE="{{ .Data.data.traces_sample_rate | default "0.1" }}"
+    {{- end }}
+  
+  # IPFS configuration template
+  ipfs-config.tpl: |
+    {{- with secret "secret/data/leaseflow/ipfs" -}}
+    export IPFS_PROJECT_ID="{{ .Data.data.project_id }}"
+    export IPFS_PROJECT_SECRET="{{ .Data.data.project_secret }}"
+    export IPFS_AUTH_HEADER="{{ .Data.data.auth_header | default "" }}"
+    {{- end }}
+  
+  # Twilio configuration template
+  twilio-config.tpl: |
+    {{- with secret "secret/data/leaseflow/twilio" -}}
+    export TWILIO_ACCOUNT_SID="{{ .Data.data.account_sid }}"
+    export TWILIO_AUTH_TOKEN="{{ .Data.data.auth_token }}"
+    export TWILIO_PHONE_NUMBER="{{ .Data.data.phone_number }}"
+    {{- end }}
+  
+  # Identity provider configuration template
+  identity-config.tpl: |
+    {{- with secret "secret/data/leaseflow/identity" -}}
+    export SUMSUB_API_TOKEN="{{ .Data.data.sumsub_api_token }}"
+    export SUMSUB_API_SECRET="{{ .Data.data.sumsub_api_secret }}"
+    export JUMIO_API_TOKEN="{{ .Data.data.jumio_api_token }}"
+    export JUMIO_API_SECRET="{{ .Data.data.jumio_api_secret }}"
+    {{- end }}
+
+---
+# Vault Kubernetes authentication setup script
+# Run these commands in Vault to configure Kubernetes authentication
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-setup-commands
+  namespace: leaseflow
+data:
+  setup.sh: |
+    #!/bin/bash
+    set -e
+    
+    VAULT_ADDR="${VAULT_ADDR:-https://vault.example.com:8200}"
+    KUBERNETES_HOST="${KUBERNETES_HOST:-https://kubernetes.default.svc}"
+    KUBERNETES_CA_CERT="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    
+    echo "Configuring Vault Kubernetes authentication..."
+    
+    # Enable Kubernetes auth method
+    vault auth enable kubernetes
+    
+    # Configure Kubernetes auth
+    vault write auth/kubernetes/config \
+      kubernetes_host="$KUBERNETES_HOST" \
+      kubernetes_ca_cert=@"$KUBERNETES_CA_CERT" \
+      token_reviewer_jwt="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)"
+    
+    echo "Vault Kubernetes authentication configured successfully"
+    echo "Next steps:"
+    echo "1. Create Vault policies (see vault-policies.hcl)"
+    echo "2. Create Vault roles with: vault write auth/kubernetes/role/leaseflow-backend ..."

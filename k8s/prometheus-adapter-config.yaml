@@ -1,0 +1,328 @@
+# Prometheus Adapter Configuration for External Metrics
+# This configuration enables HPA to scale based on BullMQ/Redis queue length metrics
+# Apply with: kubectl apply -f k8s/prometheus-adapter-config.yaml
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-adapter-config
+  namespace: monitoring
+data:
+  config.yaml: |
+    rules:
+      # BullMQ Soroban Indexer Queue Length Metric
+      - seriesQuery: 'redis_queue_length{queue="soroban-indexer"}'
+        resources:
+          overrides:
+            namespace: {resource: "namespace"}
+            pod: {resource: "pod"}
+        name:
+          matches: "^(.*)_queue_length$"
+          as: "bullmq_${1}_queue_length"
+        metricsQuery: 'sum(redis_queue_length{queue="soroban-indexer"}) by (<<.GroupBy>>)'
+      
+      # BullMQ Webhook Queue Length Metric
+      - seriesQuery: 'redis_queue_length{queue="webhook"}'
+        resources:
+          overrides:
+            namespace: {resource: "namespace"}
+            pod: {resource: "pod"}
+        name:
+          matches: "^(.*)_queue_length$"
+          as: "bullmq_${1}_queue_length"
+        metricsQuery: 'sum(redis_queue_length{queue="webhook"}) by (<<.GroupBy>>)'
+      
+      # Generic BullMQ Queue Length Metric (for any queue)
+      - seriesQuery: 'redis_queue_length'
+        resources:
+          overrides:
+            namespace: {resource: "namespace"}
+            pod: {resource: "pod"}
+        name:
+          matches: "^(.*)_queue_length$"
+          as: "bullmq_${1}_queue_length"
+        metricsQuery: 'sum(redis_queue_length{queue="{{.Label}}"} ) by (<<.GroupBy>>)'
+
+---
+# Prometheus Adapter Deployment with Custom Config
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-adapter
+  namespace: monitoring
+  labels:
+    app: prometheus-adapter
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: prometheus-adapter
+  template:
+    metadata:
+      labels:
+        app: prometheus-adapter
+    spec:
+      serviceAccountName: prometheus-adapter
+      containers:
+        - name: prometheus-adapter
+          image: registry.k8s.io/prometheus-adapter/prometheus-adapter:v0.11.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --cert-dir=/var/run/serving-cert
+            - --config=/etc/adapter/config.yaml
+            - --logtostderr=true
+            - --prometheus-url=http://prometheus-service.monitoring.svc:9090/
+            - --metrics-relist-interval=30s
+            - --v=4
+          ports:
+            - containerPort: 443
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 443
+              scheme: HTTPS
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 443
+              scheme: HTTPS
+          volumeMounts:
+            - name: tmpfs
+              mountPath: /tmp
+            - name: volume-serving-cert
+              mountPath: /var/run/serving-cert
+            - name: config
+              mountPath: /etc/adapter
+              readOnly: true
+      volumes:
+        - name: tmpfs
+          emptyDir: {}
+        - name: volume-serving-cert
+          emptyDir: {}
+        - name: config
+          configMap:
+            name: prometheus-adapter-config
+
+---
+# Service for Prometheus Adapter
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-adapter
+  namespace: monitoring
+  labels:
+    app: prometheus-adapter
+spec:
+  ports:
+    - port: 443
+      targetPort: 443
+  selector:
+    app: prometheus-adapter
+
+---
+# Service Account for Prometheus Adapter
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-adapter
+  namespace: monitoring
+
+---
+# Cluster Role for Prometheus Adapter
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-adapter
+rules:
+  - apiGroups:
+      - metrics.k8s.io
+    resources:
+      - podmetrics
+      - nodemetrics
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - custom.metrics.k8s.io
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - external.metrics.k8s.io
+    resources:
+      - "*"
+    verbs:
+      - get
+      - list
+      - watch
+
+---
+# Cluster Role Binding for Prometheus Adapter
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-adapter
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-adapter
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-adapter
+    namespace: monitoring
+
+---
+# APIService for Custom Metrics
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.custom.metrics.k8s.io
+spec:
+  service:
+    name: prometheus-adapter
+    namespace: monitoring
+  group: custom.metrics.k8s.io
+  version: v1beta1
+  insecureSkipTLSVerify: true
+  groupPriorityMinimum: 100
+  versionPriority: 100
+
+---
+# APIService for External Metrics
+apiVersion: apiregistration.k8s.io/v1
+kind: APIService
+metadata:
+  name: v1beta1.external.metrics.k8s.io
+spec:
+  service:
+    name: prometheus-adapter
+    namespace: monitoring
+  group: external.metrics.k8s.io
+  version: v1beta1
+  insecureSkipTLSVerify: true
+  groupPriorityMinimum: 100
+  versionPriority: 100
+
+---
+# Prometheus Exporter for Redis Queue Length
+# This exporter exposes BullMQ queue length metrics to Prometheus
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-queue-exporter
+  namespace: monitoring
+  labels:
+    app: redis-queue-exporter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-queue-exporter
+  template:
+    metadata:
+      labels:
+        app: redis-queue-exporter
+    spec:
+      containers:
+        - name: redis-queue-exporter
+          image: oliver006/redis_exporter:v1.55.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - "-redis.addr=redis-service:6379"
+            - "-redis.password=${REDIS_PASSWORD}"
+            - "-redis-only-metrics=true"
+            - "-check-keys=soroban-indexer:*,webhook:*"
+            - "-script=/etc/redis_exporter/queue_length.lua"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+          ports:
+            - containerPort: 9121
+          resources:
+            limits:
+              cpu: 100m
+              memory: 128Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+      volumes:
+        - name: redis-exporter-script
+          configMap:
+            name: redis-exporter-script
+
+---
+# ConfigMap for Redis Exporter Lua Script
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-exporter-script
+  namespace: monitoring
+data:
+  queue_length.lua: |
+    -- Lua script to export BullMQ queue length metrics
+    local queues = redis.call('KEYS', '*')
+    local metrics = {}
+    
+    for i, queue in ipairs(queues) do
+      local queue_name = string.match(queue, '^(.*):.*')
+      if queue_name then
+        local wait_count = redis.call('LLEN', queue .. ':wait')
+        local active_count = redis.call('LLEN', queue .. ':active')
+        local delayed_count = redis.call('ZCARD', queue .. ':delayed')
+        local completed_count = redis.call('LLEN', queue .. ':completed')
+        local failed_count = redis.call('LLEN', queue .. ':failed')
+        
+        table.insert(metrics, queue_name .. '_queue_length{queue="' .. queue_name .. '",state="wait"} ' .. wait_count)
+        table.insert(metrics, queue_name .. '_queue_length{queue="' .. queue_name .. '",state="active"} ' .. active_count)
+        table.insert(metrics, queue_name .. '_queue_length{queue="' .. queue_name .. '",state="delayed"} ' .. delayed_count)
+        table.insert(metrics, queue_name .. '_queue_length{queue="' .. queue_name .. '",state="completed"} ' .. completed_count)
+        table.insert(metrics, queue_name .. '_queue_length{queue="' .. queue_name .. '",state="failed"} ' .. failed_count)
+      end
+    end
+    
+    return table.concat(metrics, '\n')
+
+---
+# Service for Redis Queue Exporter
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-queue-exporter
+  namespace: monitoring
+  labels:
+    app: redis-queue-exporter
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9121"
+spec:
+  ports:
+    - port: 9121
+      targetPort: 9121
+      name: metrics
+  selector:
+    app: redis-queue-exporter
+
+---
+# ServiceMonitor for Prometheus to scrape Redis Queue Exporter
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: redis-queue-exporter
+  namespace: monitoring
+  labels:
+    app: redis-queue-exporter
+spec:
+  selector:
+    matchLabels:
+      app: redis-queue-exporter
+  endpoints:
+    - port: metrics
+      interval: 15s
+      path: /metrics

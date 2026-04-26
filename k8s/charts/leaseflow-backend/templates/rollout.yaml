@@ -1,20 +1,83 @@
-apiVersion: apps/v1
-kind: Deployment
+{{- if .Values.argoRollouts.enabled -}}
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
 metadata:
   name: {{ include "leaseflow-backend.fullname" . }}
   labels:
     {{- include "leaseflow-backend.labels" . | nindent 4 }}
 spec:
-  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
-  {{- end }}
   selector:
     matchLabels:
       {{- include "leaseflow-backend.selectorLabels" . | nindent 6 }}
-  {{- with .Values.strategy }}
   strategy:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- if eq .Values.argoRollouts.strategy "bluegreen" }}
+    blueGreen:
+      activeService: {{ include "leaseflow-backend.fullname" . }}-active
+      previewService: {{ include "leaseflow-backend.fullname" . }}-preview
+      previewReplicaCount: {{ .Values.argoRollouts.previewReplicaCount | default 1 }}
+      autoPromotionEnabled: {{ .Values.argoRollouts.autoPromotionEnabled | default false }}
+      scaleDownDelaySeconds: {{ .Values.argoRollouts.scaleDownDelaySeconds | default 30 }}
+      antiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchLabels:
+                  {{- include "leaseflow-backend.selectorLabels" . | nindent 18 }}
+              topologyKey: kubernetes.io/hostname
+      analysis:
+        templates:
+          - templateName: {{ include "leaseflow-backend.fullname" . }}-analysis
+        args:
+          - name: service-name
+            value: {{ include "leaseflow-backend.fullname" . }}-preview
+      prePromotionAnalysis:
+        templates:
+          - templateName: {{ include "leaseflow-backend.fullname" . }}-pre-promotion-analysis
+        args:
+          - name: service-name
+            value: {{ include "leaseflow-backend.fullname" . }}-preview
+      postPromotionAnalysis:
+        templates:
+          - templateName: {{ include "leaseflow-backend.fullname" . }}-post-promotion-analysis
+        args:
+          - name: service-name
+            value: {{ include "leaseflow-backend.fullname" . }}-active
+    {{- else if eq .Values.argoRollouts.strategy "canary" }}
+    canary:
+      canaryService: {{ include "leaseflow-backend.fullname" . }}-canary
+      stableService: {{ include "leaseflow-backend.fullname" . }}-stable
+      trafficRouting:
+        nginx:
+          stableIngress: {{ include "leaseflow-backend.fullname" . }}
+      steps:
+        - setWeight: 10
+        - pause: { duration: 1m }
+        - analysis:
+            templates:
+              - templateName: {{ include "leaseflow-backend.fullname" . }}-analysis
+            args:
+              - name: service-name
+                value: {{ include "leaseflow-backend.fullname" . }}-canary
+        - setWeight: 25
+        - pause: { duration: 1m }
+        - analysis:
+            templates:
+              - templateName: {{ include "leaseflow-backend.fullname" . }}-analysis
+            args:
+              - name: service-name
+                value: {{ include "leaseflow-backend.fullname" . }}-canary
+        - setWeight: 50
+        - pause: { duration: 1m }
+        - analysis:
+            templates:
+              - templateName: {{ include "leaseflow-backend.fullname" . }}-analysis
+            args:
+              - name: service-name
+                value: {{ include "leaseflow-backend.fullname" . }}-canary
+        - setWeight: 100
+    {{- end }}
   template:
     metadata:
       annotations:
@@ -33,6 +96,9 @@ spec:
         {{- end }}
       labels:
         {{- include "leaseflow-backend.selectorLabels" . | nindent 8 }}
+        {{- if .Values.argoRollouts.strategy }}
+        rollout-status: "{{ .Values.argoRollouts.strategy }}"
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -264,6 +330,13 @@ spec:
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+            # Redis cache key isolation for Blue/Green
+            - name: CACHE_KEY_PREFIX
+              value: "{{ .Values.argoRollouts.cacheKeyPrefix | default "leaseflow" }}"
+            - name: DEPLOYMENT_COLOR
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.labels['rollout-status']
           # Liveness probe
           livenessProbe:
             {{- toYaml .Values.livenessProbe | nindent 12 }}
@@ -340,3 +413,4 @@ spec:
       {{- end }}
       # Termination grace period for graceful shutdown
       terminationGracePeriodSeconds: 60
+{{- end }}

@@ -1,0 +1,250 @@
+# Vault Agent Configuration for Secure Credential Fetching
+# This configuration enables the migration initContainer to fetch database credentials
+# from HashiCorp Vault securely using Kubernetes authentication
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vault-auth
+  namespace: leaseflow
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vault-auth-role
+  namespace: leaseflow
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vault-auth-rolebinding
+  namespace: leaseflow
+subjects:
+  - kind: ServiceAccount
+    name: vault-auth
+    namespace: leaseflow
+roleRef:
+  kind: Role
+  name: vault-auth-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Vault Agent Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-agent-config
+  namespace: leaseflow
+data:
+  config.hcl: |
+    pid_file = "/tmp/vault-agent.pid"
+    
+    auto_auth {
+      method "kubernetes" {
+        mount_path = "auth/kubernetes"
+        config = {
+          role = "leaseflow-migration"
+        }
+      }
+      
+      sink "file" {
+        config = {
+          path = "/home/vault/.vault-token"
+        }
+      }
+    }
+    
+    template {
+      source = "/etc/vault/templates/db-credentials.tpl"
+      destination = "/etc/vault/secrets/db-credentials.env"
+      error_on_missing_key = true
+    }
+
+---
+# Template for database credentials
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-templates
+  namespace: leaseflow
+data:
+  db-credentials.tpl: |
+    {{- with secret "secret/data/leaseflow/database" -}}
+    DB_PASSWORD={{ .Data.data.password }}
+    DB_USER={{ .Data.data.username | default "postgres" }}
+    {{- end }}
+
+---
+# Vault Secret containing Vault token (for non-K8s auth method)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vault-token
+  namespace: leaseflow
+type: Opaque
+stringData:
+  # This should be populated by your CI/CD pipeline or Vault operator
+  token: ""  # Replace with actual Vault token or use Kubernetes auth
+
+---
+# Vault Agent DaemonSet (optional - for sidecar pattern)
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vault-agent
+  namespace: leaseflow
+  labels:
+    app: vault-agent
+spec:
+  selector:
+    matchLabels:
+      app: vault-agent
+  template:
+    metadata:
+      labels:
+        app: vault-agent
+    spec:
+      serviceAccountName: vault-auth
+      containers:
+        - name: vault-agent
+          image: hashicorp/vault:1.15.0
+          securityContext:
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+          args:
+            - "agent"
+            - "-config=/etc/vault/config.hcl"
+            - "-exit-after-auth"
+          env:
+            - name: VAULT_ADDR
+              value: "https://vault.example.com:8200"
+            - name: VAULT_SKIP_VERIFY
+              value: "false"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/vault
+            - name: templates
+              mountPath: /etc/vault/templates
+            - name: secrets
+              mountPath: /etc/vault/secrets
+          resources:
+            limits:
+              cpu: 100m
+              memory: 64Mi
+            requests:
+              cpu: 50m
+              memory: 32Mi
+      volumes:
+        - name: config
+          configMap:
+            name: vault-agent-config
+            items:
+              - key: config.hcl
+                path: config.hcl
+        - name: templates
+          configMap:
+            name: vault-templates
+        - name: secrets
+          emptyDir:
+            medium: Memory
+
+---
+# Alternative: Vault Agent as InitContainer (recommended for migrations)
+# This is configured in the deployment template, but here's the standalone version
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-init-config
+  namespace: leaseflow
+data:
+  vault-init.sh: |
+    #!/bin/sh
+    set -e
+    
+    # Vault configuration
+    export VAULT_ADDR="${VAULT_ADDR:-https://vault.example.com:8200}"
+    export VAULT_ROLE="${VAULT_ROLE:-leaseflow-migration}"
+    export SECRET_PATH="${SECRET_PATH:-secret/data/leaseflow/database}"
+    
+    # Kubernetes authentication
+    if [ -n "$KUBERNETES_AUTH_MOUNT" ]; then
+      echo "Using Kubernetes authentication..."
+      export VAULT_TOKEN=$(vault write -field=token auth/${KUBERNETES_AUTH_MOUNT}/login role=$VAULT_ROLE jwt=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token))
+    fi
+    
+    # Fetch database credentials
+    echo "Fetching database credentials from Vault..."
+    DB_PASSWORD=$(vault kv get -field=password $SECRET_PATH)
+    DB_USER=$(vault kv get -field=username $SECRET_PATH)
+    
+    # Export credentials for migration script
+    export DB_PASSWORD
+    export DB_USER
+    
+    echo "Credentials fetched successfully"
+    
+    # Execute migration script
+    exec /usr/local/bin/run-migrations.sh run
+
+---
+# Kubernetes Secret for Vault CA certificate (if using custom CA)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vault-ca
+  namespace: leaseflow
+type: Opaque
+data:
+  ca.crt: ""  # Base64-encoded CA certificate
+
+---
+# Vault Policy for Migration Role
+# This should be configured in Vault separately
+# vault policy write leaseflow-migration - <<EOF
+# path "secret/data/leaseflow/database" {
+#   capabilities = ["read"]
+# }
+# EOF
+#
+# vault write auth/kubernetes/role/leaseflow-migration \
+#   bound_service_account_names=vault-auth \
+#   bound_service_account_namespaces=leaseflow \
+#   policies=leaseflow-migration \
+#   ttl=24h
+
+---
+# Example: Vault Kubernetes Authentication Configuration
+# Run these commands in Vault to set up Kubernetes authentication:
+#
+# # Enable Kubernetes auth method
+# vault auth enable kubernetes
+#
+# # Configure Kubernetes auth
+# vault write auth/kubernetes/config \
+#   kubernetes_host="https://$KUBERNETES_PORT_443_TCP_ADDR:443" \
+#   kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+#
+# # Create policy for migration
+# vault policy write leaseflow-migration - <<EOF
+# path "secret/data/leaseflow/database" {
+#   capabilities = ["read"]
+# }
+# EOF
+#
+# # Create role
+# vault write auth/kubernetes/role/leaseflow-migration \
+#   bound_service_account_names=vault-auth \
+#   bound_service_account_namespaces=leaseflow \
+#   policies=leaseflow-migration \
+#   ttl=24h

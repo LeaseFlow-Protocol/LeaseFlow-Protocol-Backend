@@ -1,0 +1,332 @@
+# Vault Sidecar Injector Configuration
+# This configuration enables Vault to inject secrets directly into pods using the sidecar pattern
+# Apply with: kubectl apply -f k8s/vault-sidecar-injector-config.yaml
+
+---
+# Vault Agent Injector Annotation Template
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-injector-templates
+  namespace: leaseflow
+data:
+  # Sidecar injection template for LeaseFlow backend
+  leaseflow-backend-template.hcl: |
+    template {
+      source = <<EOF
+      {{- with secret "database/creds/leaseflow-backend" -}}
+      export DB_HOST="{{ .Data.data.host }}"
+      export DB_PORT="{{ .Data.data.port }}"
+      export DB_NAME="{{ .Data.data.dbname }}"
+      export DB_USER="{{ .Data.data.username }}"
+      export DB_PASSWORD="{{ .Data.data.password }}"
+      {{- end }}
+      
+      {{- with secret "secret/data/leaseflow/jwt" -}}
+      export JWT_SECRET="{{ .Data.data.secret }}"
+      export JWT_ISSUER="{{ .Data.data.issuer | default "leaseflow-backend" }}"
+      export JWT_AUDIENCE="{{ .Data.data.audience | default "leaseflow-users" }}"
+      {{- end }}
+      
+      {{- with secret "secret/data/leaseflow/redis" -}}
+      export REDIS_HOST="{{ .Data.data.host }}"
+      export REDIS_PORT="{{ .Data.data.port }}"
+      export REDIS_PASSWORD="{{ .Data.data.password }}"
+      {{- end }}
+      
+      {{- with secret "secret/data/leaseflow/stellar" -}}
+      export STELLAR_NETWORK_PASSPHRASE="{{ .Data.data.network_passphrase }}"
+      export SOROBAN_NETWORK_URL="{{ .Data.data.soroban_url }}"
+      {{- end }}
+      
+      {{- with secret "secret/data/leaseflow/sentry" -}}
+      export SENTRY_DSN="{{ .Data.data.dsn }}"
+      {{- end }}
+      
+      {{- with secret "secret/data/leaseflow/ipfs" -}}
+      export IPFS_PROJECT_ID="{{ .Data.data.project_id }}"
+      export IPFS_PROJECT_SECRET="{{ .Data.data.project_secret }}"
+      {{- end }}
+      
+      {{- with secret "secret/data/leaseflow/sendgrid" -}}
+      export SENDGRID_API_KEY="{{ .Data.data.api_key }}"
+      {{- end }}
+      
+      {{- with secret "secret/data/leaseflow/twilio" -}}
+      export TWILIO_ACCOUNT_SID="{{ .Data.data.account_sid }}"
+      export TWILIO_AUTH_TOKEN="{{ .Data.data.auth_token }}"
+      {{- end }}
+      EOF
+      
+      destination = "/vault/secrets/.env"
+      error_on_missing_key = true
+    }
+
+---
+# Pod Annotation Template for Vault Agent Injection
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-pod-annotations
+  namespace: leaseflow
+data:
+  annotations.yaml: |
+    # Add these annotations to your pod spec to enable Vault agent injection
+    vault.hashicorp.com/agent-inject: "true"
+    vault.hashicorp.com/agent-inject-status: "true"
+    vault.hashicorp.com/role: "leaseflow-backend"
+    vault.hashicorp.com/agent-pre-populate-only: "false"
+    vault.hashicorp.com/agent-config-map: "vault-agent-config"
+    
+    # Inject database credentials
+    vault.hashicorp.com/secret-volume-path: "/vault/secrets"
+    vault.hashicorp.com/agent-pre-populate: "true"
+    
+    # Template for database credentials
+    vault.hashicorp.com/template-config: |
+      template {
+        source = <<EOF
+      {{- with secret "database/creds/leaseflow-backend" -}}
+      DB_HOST="{{ .Data.data.host }}"
+      DB_PORT="{{ .Data.data.port }}"
+      DB_NAME="{{ .Data.data.dbname }}"
+      DB_USER="{{ .Data.data.username }}"
+      DB_PASSWORD="{{ .Data.data.password }}"
+      {{- end }}
+      EOF
+        destination = "/vault/secrets/database-credentials.env"
+        error_on_missing_key = true
+      }
+    
+    # Template for JWT secret
+    vault.hashicorp.com/template-jwt: |
+      template {
+        source = <<EOF
+      {{- with secret "secret/data/leaseflow/jwt" -}}
+      JWT_SECRET="{{ .Data.data.secret }}"
+      JWT_ISSUER="{{ .Data.data.issuer | default "leaseflow-backend" }}"
+      JWT_AUDIENCE="{{ .Data.data.audience | default "leaseflow-users" }}"
+      {{- end }}
+      EOF
+        destination = "/vault/secrets/jwt-credentials.env"
+        error_on_missing_key = true
+      }
+    
+    # Template for Redis credentials
+    vault.hashicorp.com/template-redis: |
+      template {
+        source = <<EOF
+      {{- with secret "secret/data/leaseflow/redis" -}}
+      REDIS_HOST="{{ .Data.data.host }}"
+      REDIS_PORT="{{ .Data.data.port }}"
+      REDIS_PASSWORD="{{ .Data.data.password }}"
+      {{- end }}
+      EOF
+        destination = "/vault/secrets/redis-credentials.env"
+        error_on_missing_key = true
+      }
+
+---
+# Custom Resource Definition for Vault Agent Config (if using Vault Agent Injector)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-agent-config-custom
+  namespace: leaseflow
+data:
+  custom-config.hcl: |
+    pid_file = "/tmp/vault-agent.pid"
+    
+    auto_auth {
+      method "kubernetes" {
+        mount_path = "auth/kubernetes"
+        config = {
+          role = "leaseflow-backend"
+        }
+      }
+      
+      sink "file" {
+        config = {
+          path = "/home/vault/.vault-token"
+        }
+      }
+    }
+    
+    # Template for secret injection
+    template {
+      source = "/etc/vault/templates/database-credentials.tpl"
+      destination = "/vault/secrets/database.env"
+      error_on_missing_key = true
+    }
+    
+    template {
+      source = "/etc/vault/templates/jwt-secret.tpl"
+      destination = "/vault/secrets/jwt.env"
+      error_on_missing_key = true
+    }
+    
+    template {
+      source = "/etc/vault/templates/redis-credentials.tpl"
+      destination = "/vault/secrets/redis.env"
+      error_on_missing_key = true
+    }
+    
+    template {
+      source = "/etc/vault/templates/stellar-config.tpl"
+      destination = "/vault/secrets/stellar.env"
+      error_on_missing_key = true
+    }
+    
+    template {
+      source = "/etc/vault/templates/sentry-config.tpl"
+      destination = "/vault/secrets/sentry.env"
+      error_on_missing_key = true
+    }
+    
+    template {
+      source = "/etc/vault/templates/ipfs-config.tpl"
+      destination = "/vault/secrets/ipfs.env"
+      error_on_missing_key = true
+    }
+    
+    template {
+      source = "/etc/vault/templates/sendgrid-config.tpl"
+      destination = "/vault/secrets/sendgrid.env"
+      error_on_missing_key = true
+    }
+    
+    template {
+      source = "/etc/vault/templates/twilio-config.tpl"
+      destination = "/vault/secrets/twilio.env"
+      error_on_missing_key = true
+    }
+    
+    template {
+      source = "/etc/vault/templates/identity-config.tpl"
+      destination = "/vault/secrets/identity.env"
+      error_on_missing_key = true
+    }
+
+---
+# Vault Agent Sidecar as InitContainer (alternative to injector)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-init-container
+  namespace: leaseflow
+data:
+  vault-init.sh: |
+    #!/bin/sh
+    set -e
+    
+    VAULT_ADDR="${VAULT_ADDR:-https://vault.example.com:8200}"
+    VAULT_ROLE="${VAULT_ROLE:-leaseflow-backend}"
+    SECRET_MOUNT="/vault/secrets"
+    
+    echo "Starting Vault agent init container..."
+    
+    # Authenticate to Vault using Kubernetes
+    export VAULT_TOKEN=$(vault write -field=token auth/kubernetes/login role=$VAULT_ROLE jwt=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token))
+    
+    if [ -z "$VAULT_TOKEN" ]; then
+      echo "ERROR: Failed to authenticate to Vault"
+      exit 1
+    fi
+    
+    echo "Successfully authenticated to Vault"
+    
+    # Fetch database credentials
+    echo "Fetching database credentials..."
+    vault kv get -format=json database/creds/leaseflow-backend > /tmp/db-creds.json
+    DB_HOST=$(jq -r '.data.data.host' /tmp/db-creds.json)
+    DB_PORT=$(jq -r '.data.data.port' /tmp/db-creds.json)
+    DB_NAME=$(jq -r '.data.data.dbname' /tmp/db-creds.json)
+    DB_USER=$(jq -r '.data.data.username' /tmp/db-creds.json)
+    DB_PASSWORD=$(jq -r '.data.data.password' /tmp/db-creds.json)
+    
+    echo "DB_HOST=$DB_HOST" > $SECRET_MOUNT/database.env
+    echo "DB_PORT=$DB_PORT" >> $SECRET_MOUNT/database.env
+    echo "DB_NAME=$DB_NAME" >> $SECRET_MOUNT/database.env
+    echo "DB_USER=$DB_USER" >> $SECRET_MOUNT/database.env
+    echo "DB_PASSWORD=$DB_PASSWORD" >> $SECRET_MOUNT/database.env
+    
+    # Fetch JWT secret
+    echo "Fetching JWT secret..."
+    vault kv get -format=json secret/data/leaseflow/jwt > /tmp/jwt-creds.json
+    JWT_SECRET=$(jq -r '.data.data.secret' /tmp/jwt-creds.json)
+    JWT_ISSUER=$(jq -r '.data.data.issuer' /tmp/jwt-creds.json)
+    JWT_AUDIENCE=$(jq -r '.data.data.audience' /tmp/jwt-creds.json)
+    
+    echo "JWT_SECRET=$JWT_SECRET" > $SECRET_MOUNT/jwt.env
+    echo "JWT_ISSUER=$JWT_ISSUER" >> $SECRET_MOUNT/jwt.env
+    echo "JWT_AUDIENCE=$JWT_AUDIENCE" >> $SECRET_MOUNT/jwt.env
+    
+    # Fetch Redis credentials
+    echo "Fetching Redis credentials..."
+    vault kv get -format=json secret/data/leaseflow/redis > /tmp/redis-creds.json
+    REDIS_HOST=$(jq -r '.data.data.host' /tmp/redis-creds.json)
+    REDIS_PORT=$(jq -r '.data.data.port' /tmp/redis-creds.json)
+    REDIS_PASSWORD=$(jq -r '.data.data.password' /tmp/redis-creds.json)
+    
+    echo "REDIS_HOST=$REDIS_HOST" > $SECRET_MOUNT/redis.env
+    echo "REDIS_PORT=$REDIS_PORT" >> $SECRET_MOUNT/redis.env
+    echo "REDIS_PASSWORD=$REDIS_PASSWORD" >> $SECRET_MOUNT/redis.env
+    
+    # Fetch other secrets as needed
+    echo "Fetching additional secrets..."
+    
+    # Stellar configuration
+    vault kv get -format=json secret/data/leaseflow/stellar > /tmp/stellar-creds.json 2>/dev/null || true
+    if [ -f /tmp/stellar-creds.json ]; then
+      STELLAR_NETWORK_PASSPHRASE=$(jq -r '.data.data.network_passphrase' /tmp/stellar-creds.json)
+      SOROBAN_NETWORK_URL=$(jq -r '.data.data.soroban_url' /tmp/stellar-creds.json)
+      
+      echo "STELLAR_NETWORK_PASSPHRASE=$STELLAR_NETWORK_PASSPHRASE" > $SECRET_MOUNT/stellar.env
+      echo "SOROBAN_NETWORK_URL=$SOROBAN_NETWORK_URL" >> $SECRET_MOUNT/stellar.env
+    fi
+    
+    # Sentry configuration
+    vault kv get -format=json secret/data/leaseflow/sentry > /tmp/sentry-creds.json 2>/dev/null || true
+    if [ -f /tmp/sentry-creds.json ]; then
+      SENTRY_DSN=$(jq -r '.data.data.dsn' /tmp/sentry-creds.json)
+      
+      echo "SENTRY_DSN=$SENTRY_DSN" > $SECRET_MOUNT/sentry.env
+    fi
+    
+    # IPFS configuration
+    vault kv get -format=json secret/data/leaseflow/ipfs > /tmp/ipfs-creds.json 2>/dev/null || true
+    if [ -f /tmp/ipfs-creds.json ]; then
+      IPFS_PROJECT_ID=$(jq -r '.data.data.project_id' /tmp/ipfs-creds.json)
+      IPFS_PROJECT_SECRET=$(jq -r '.data.data.project_secret' /tmp/ipfs-creds.json)
+      
+      echo "IPFS_PROJECT_ID=$IPFS_PROJECT_ID" > $SECRET_MOUNT/ipfs.env
+      echo "IPFS_PROJECT_SECRET=$IPFS_PROJECT_SECRET" >> $SECRET_MOUNT/ipfs.env
+    fi
+    
+    # SendGrid configuration
+    vault kv get -format=json secret/data/leaseflow/sendgrid > /tmp/sendgrid-creds.json 2>/dev/null || true
+    if [ -f /tmp/sendgrid-creds.json ]; then
+      SENDGRID_API_KEY=$(jq -r '.data.data.api_key' /tmp/sendgrid-creds.json)
+      
+      echo "SENDGRID_API_KEY=$SENDGRID_API_KEY" > $SECRET_MOUNT/sendgrid.env
+    fi
+    
+    # Twilio configuration
+    vault kv get -format=json secret/data/leaseflow/twilio > /tmp/twilio-creds.json 2>/dev/null || true
+    if [ -f /tmp/twilio-creds.json ]; then
+      TWILIO_ACCOUNT_SID=$(jq -r '.data.data.account_sid' /tmp/twilio-creds.json)
+      TWILIO_AUTH_TOKEN=$(jq -r '.data.data.auth_token' /tmp/twilio-creds.json)
+      TWILIO_PHONE_NUMBER=$(jq -r '.data.data.phone_number' /tmp/twilio-creds.json)
+      
+      echo "TWILIO_ACCOUNT_SID=$TWILIO_ACCOUNT_SID" > $SECRET_MOUNT/twilio.env
+      echo "TWILIO_AUTH_TOKEN=$TWILIO_AUTH_TOKEN" >> $SECRET_MOUNT/twilio.env
+      echo "TWILIO_PHONE_NUMBER=$TWILIO_PHONE_NUMBER" >> $SECRET_MOUNT/twilio.env
+    fi
+    
+    echo "All secrets fetched successfully"
+    echo "Secrets written to $SECRET_MOUNT"
+    
+    # Revoke Vault token (optional, for enhanced security)
+    # vault token revoke -self
+    
+    exit 0

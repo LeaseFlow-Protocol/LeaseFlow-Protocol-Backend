@@ -1,0 +1,64 @@
+{{- if and .Values.workers.enabled .Values.workers.autoscaling.enabled -}}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "leaseflow-backend.fullname" . }}-worker
+  labels:
+    {{- include "leaseflow-backend.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "leaseflow-backend.fullname" . }}-worker
+  minReplicas: {{ .Values.workers.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.workers.autoscaling.maxReplicas }}
+  metrics:
+    {{- if .Values.workers.autoscaling.targetCPUUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.workers.autoscaling.targetCPUUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.workers.autoscaling.targetMemoryUtilizationPercentage }}
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.workers.autoscaling.targetMemoryUtilizationPercentage }}
+    {{- end }}
+    {{- if .Values.workers.autoscaling.externalMetrics }}
+    {{- range .Values.workers.autoscaling.externalMetrics }}
+    - type: External
+      external:
+        metric:
+          name: {{ .name }}
+          selector:
+            matchLabels:
+              {{- toYaml .selector | nindent 12 }}
+        target:
+          type: {{ .targetType | default "AverageValue" }}
+          averageValue: {{ .targetValue }}
+    {{- end }}
+    {{- end }}
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: {{ .Values.workers.autoscaling.scaleDownStabilizationSeconds | default 300 }}
+      policies:
+        - type: Percent
+          value: {{ .Values.workers.autoscaling.scaleDownPercent | default 50 }}
+          periodSeconds: {{ .Values.workers.autoscaling.scaleDownPeriodSeconds | default 60 }}
+    scaleUp:
+      stabilizationWindowSeconds: {{ .Values.workers.autoscaling.scaleUpStabilizationSeconds | default 0 }}
+      policies:
+        - type: Percent
+          value: {{ .Values.workers.autoscaling.scaleUpPercent | default 100 }}
+          periodSeconds: {{ .Values.workers.autoscaling.scaleUpPeriodSeconds | default 30 }}
+        - type: Pods
+          value: {{ .Values.workers.autoscaling.scaleUpPods | default 2 }}
+          periodSeconds: {{ .Values.workers.autoscaling.scaleUpPeriodSeconds | default 30 }}
+      selectPolicy: Max
+{{- end }}

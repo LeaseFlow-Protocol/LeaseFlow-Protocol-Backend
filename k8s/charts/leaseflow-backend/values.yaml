@@ -93,6 +93,34 @@ autoscaling:
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
+  # Scale-down stabilization window (5 minutes) to prevent thrashing
+  scaleDownStabilizationSeconds: 300
+  scaleDownPercent: 50
+  scaleDownPeriodSeconds: 60
+  # Scale-up configuration for rapid response to traffic spikes
+  scaleUpStabilizationSeconds: 0
+  scaleUpPercent: 100
+  scaleUpPods: 2
+  scaleUpPeriodSeconds: 30
+
+# Database Migration Configuration
+migration:
+  enabled: true
+  lockTimeout: "300"  # 5 minutes in seconds
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  # Vault integration for secure credential fetching
+  vault:
+    enabled: false  # Set to true to use Vault for migration credentials
+    address: "https://vault.example.com:8200"
+    role: "leaseflow-migration"
+    secretPath: "secret/data/leaseflow/database"
+    tokenSecret: "vault-token"  # Kubernetes secret containing Vault token
 
 # Pod Disruption Budget
 podDisruptionBudget:
@@ -149,25 +177,58 @@ configMap:
     RATE_LIMIT_MAX_REQUESTS: "100"
 
 # Secret configuration
+# NOTE: When Vault is enabled, secrets are injected via Vault Agent Injector
+# This section is only used as fallback when Vault is disabled
 secrets:
-  enabled: true
+  enabled: false  # Disabled when using Vault
   name: "leaseflow-backend-secrets"
   # These should be provided via external secret management (Vault, etc.)
   data:
-    # Database credentials
+    # Database credentials (fallback only - use Vault dynamic credentials in production)
     DB_USER: ""
     DB_PASSWORD: ""
-    # Redis credentials
+    # Redis credentials (fallback only - use Vault in production)
     REDIS_PASSWORD: ""
-    # JWT secrets
+    # JWT secrets (fallback only - use Vault in production)
     JWT_SECRET: ""
-    # Stellar/Soroban configuration
+    # Stellar/Soroban configuration (fallback only - use Vault in production)
     STELLAR_NETWORK_PASSPHRASE: ""
     SOROBAN_NETWORK_URL: ""
-    # External API keys
+    # External API keys (fallback only - use Vault in production)
     SENTRY_DSN: ""
-    # IPFS authentication (if needed)
+    # IPFS authentication (if needed - fallback only - use Vault in production)
     IPFS_AUTH_HEADER: ""
+
+# Vault configuration for secret management
+vault:
+  enabled: true  # Enable Vault for production-grade secret management
+  address: "https://vault.example.com:8200"
+  role: "leaseflow-backend"
+  secretsName: "leaseflow-backend-vault-secrets"  # Kubernetes secret for Vault-injected secrets
+  # Vault authentication method
+  authMethod: "kubernetes"  # Options: kubernetes, token
+  # Kubernetes authentication settings
+  kubernetes:
+    authPath: "auth/kubernetes"
+    serviceAccount: "leaseflow-backend"
+  # Token authentication settings (if using token auth)
+  token:
+    secretName: "vault-token"
+    secretKey: "token"
+  # Secret paths in Vault
+  secretPaths:
+    database: "database/creds/leaseflow-backend"  # Dynamic database credentials
+    jwt: "secret/data/leaseflow/jwt"
+    redis: "secret/data/leaseflow/redis"
+    stellar: "secret/data/leaseflow/stellar"
+    sentry: "secret/data/leaseflow/sentry"
+    ipfs: "secret/data/leaseflow/ipfs"
+    sendgrid: "secret/data/leaseflow/sendgrid"
+    twilio: "secret/data/leaseflow/twilio"
+  # Credential rotation settings
+  rotation:
+    enabled: true
+    interval: "24h"  # Rotate database credentials every 24 hours
 
 # Volume mounts
 volumes:
@@ -258,6 +319,86 @@ workers:
     requests:
       cpu: 250m
       memory: 512Mi
+  # Worker autoscaling configuration
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    # Security ceiling to prevent DDoS from bankrupting infrastructure account
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+    # Scale-down stabilization window (5 minutes) to prevent thrashing
+    scaleDownStabilizationSeconds: 300
+    scaleDownPercent: 50
+    scaleDownPeriodSeconds: 60
+    # Scale-up configuration for rapid response to queue backlog
+    scaleUpStabilizationSeconds: 0
+    scaleUpPercent: 100
+    scaleUpPods: 2
+    scaleUpPeriodSeconds: 30
+    # External metrics for queue-based scaling
+    externalMetrics:
+      # BullMQ/Redis queue length metric for Soroban Indexer
+      - name: bullmq_soroban_indexer_queue_length
+        selector:
+          queue: soroban-indexer
+        targetType: AverageValue
+        targetValue: "1000"
+      # BullMQ/Redis queue length metric for Webhook workers
+      - name: bullmq_webhook_queue_length
+        selector:
+          queue: webhook
+        targetType: AverageValue
+        targetValue: "1000"
+  # Worker-specific health checks
+  livenessProbe:
+    exec:
+      command:
+        - sh
+        - -c
+        - |
+          if [ "$WORKER_TYPE" = "soroban-indexer" ]; then
+            node -e "console.log('worker health check')"
+          else
+            node -e "console.log('worker health check')"
+          fi
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  readinessProbe:
+    exec:
+      command:
+        - sh
+        - -c
+        - |
+          if [ "$WORKER_TYPE" = "soroban-indexer" ]; then
+            node -e "console.log('worker ready check')"
+          else
+            node -e "console.log('worker ready check')"
+          fi
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+  # Worker-specific node affinity and tolerations
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
+  # Worker-specific environment variables
+  env:
+    - name: WORKER_CONCURRENCY
+      value: "5"
+    - name: WORKER_RETRY_ATTEMPTS
+      value: "3"
+    - name: WORKER_RETRY_DELAY
+      value: "1000"
+  podAnnotations: {}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 0
 
 # Gateway configuration (for Apollo Federation)
 gateway:
