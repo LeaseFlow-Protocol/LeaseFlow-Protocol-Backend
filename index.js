@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const helmet = require("helmet");
 const path = require("path");
 const fs = require("fs");
 const { randomUUID } = require("crypto");
@@ -206,7 +207,7 @@ function createApp(dependencies = {}) {
   // Initialize Redis Service
   const redisService = new RedisService(config);
   app.locals.redisService = redisService;
-  
+
   // Initialize Redis client (lazy initialization)
   app.locals.redisClient = null; // Will be initialized when needed
 
@@ -222,6 +223,51 @@ function createApp(dependencies = {}) {
   app.use(cors());
   app.use(express.json({ limit: "50mb" }));
   app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+
+  // Security middleware with OWASP-compliant headers
+  app.use(
+    helmet({
+      // Content Security Policy - restricts scripts to verified Leaseflow domains
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: [
+            "'self'",
+            "*.leaseflow.io",
+            "*.leaseflow.com",
+            "https://cdn.jsdelivr.net",
+          ],
+          styleSrc: ["'self'", "'unsafe-inline'", "*.leaseflow.io", "*.leaseflow.com"],
+          imgSrc: ["'self'", "data:", "https:", "*.leaseflow.io", "*.leaseflow.com"],
+          connectSrc: ["'self'", "*.leaseflow.io", "*.leaseflow.com"],
+          fontSrc: ["'self'", "*.leaseflow.io", "*.leaseflow.com"],
+          objectSrc: ["'none'"],
+          mediaSrc: ["'self'"],
+          frameSrc: ["'none'"],
+        },
+      },
+      // Strict Transport Security - force HTTPS for 2 years
+      hsts: {
+        maxAge: 63072000, // 2 years in seconds
+        includeSubDomains: true,
+        preload: true,
+      },
+      // Prevent clickjacking
+      frameguard: {
+        action: "deny",
+      },
+      // Prevent MIME-sniffing
+      noSniff: true,
+      // Strip X-Powered-By header
+      hidePoweredBy: true,
+      // Referrer Policy
+      referrerPolicy: {
+        policy: "strict-origin-when-cross-origin",
+      },
+      // X-XSS-Protection
+      xssFilter: true,
+    })
+  );
 
   // Initialize Sentry
   if (config.sentry?.dsn) {
@@ -317,16 +363,16 @@ function createApp(dependencies = {}) {
   app.use('/api/v1/leases/abandoned', createAbandonedAssetRoutes(database, new NotificationService(database)));
   app.use('/api', createPaymentRoutes(database));
   app.use('/api/audit', createAuditRoutes(database));
-  
+
   // DLQ Admin Routes for Issue #105
   app.use('/admin/dlq', createDlqRoutes(config));
-  
+
   // Reputation Indexer Routes for Issue #102
   app.use('/api/v1/users', createReputationRoutes(database));
-  
+
   // Kubernetes Health Probe Routes (#116)
   app.use('/health', createHealthRoutes(database, redisService, config));
-  
+
   // Proration Calculator Routes (Issue #93)
   const prorationRoutes = require('./src/routes/prorationRoutes');
   app.use('/api/v1', prorationRoutes);
@@ -345,13 +391,13 @@ function createApp(dependencies = {}) {
   // Apply auth to dispute and invitation roots
   app.use('/api/v1/disputes', requireActorAuth(actorAuthService), disputeRoutes);
   app.use('/api/v1/invites', (req, res, next) => {
-      // /accept doesn't strictly need actor auth if using cryptographic token, 
-      // but creation does. We'll handle it inside or apply selectively.
-      if (req.path === '/accept') return next();
-      return requireActorAuth(actorAuthService)(req, res, next);
+    // /accept doesn't strictly need actor auth if using cryptographic token, 
+    // but creation does. We'll handle it inside or apply selectively.
+    if (req.path === '/accept') return next();
+    return requireActorAuth(actorAuthService)(req, res, next);
   }, invitationRoutes);
   app.use('/api/v1/metadata', metadataRoutes); // Publicly accessible for marketplaces
-  
+
   // Yield Analytics Routes (Issue #99) - Publicly accessible with pubkey validation
   app.use('/api/v1', async (req, res, next) => {
     // Initialize Redis client for yield routes if needed
@@ -533,7 +579,7 @@ if (require.main === module) {
       app.locals.subscriptionServer = subscriptionServer;
       app.locals.subscriptionManager = subscriptionManager;
       app.locals.publishers = publishers;
-      
+
       // Initialize subscription manager
       return subscriptionManager.initialize();
     })
@@ -616,7 +662,7 @@ if (require.main === module) {
 
       const reclaimWorker = new AutoReclaimWorker();
       gracefulShutdownService.registerBackgroundJob('reclaimWorker', reclaimWorker);
-      
+
       // Payment Tracker
       const paymentTrackerService = new RentPaymentTrackerService(database, sorobanLeaseService, {
         contractAccountId: config.contracts?.defaultContractId,
@@ -658,19 +704,19 @@ if (require.main === module) {
       if (config.jobs?.healthMonitorEnabled) {
         healthMonitor.start();
       }
-      
+
       // Initialize Lease Contract Controller
       if (config.jobs?.pdfGenerationEnabled !== false) {
         leaseContractController.initialize();
         console.log("Lease contract PDF generation service started");
       }
-      
+
       // Initialize RWA Asset Controller
       if (config.rwaCache?.enabled !== false) {
         rwaAssetController.initialize();
         console.log("RWA asset cache service started");
       }
-      
+
       // Initialize WebSocket System
       if (config.websocket?.enabled !== false) {
         try {
@@ -681,7 +727,7 @@ if (require.main === module) {
           console.error("Failed to start WebSocket system:", error);
         }
       }
-      
+
       // Start Dunning Pub/Sub listener
       dunningSequencer.setupPubSub();
       console.log("Rent dunning sequencer active");

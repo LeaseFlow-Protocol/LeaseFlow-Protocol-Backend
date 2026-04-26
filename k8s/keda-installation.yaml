@@ -1,0 +1,94 @@
+---
+# KEDA Installation Manifest
+# Installs KEDA (Kubernetes Event-driven Autoscaling) v2.13.0
+# This enables scaling based on Redis queue depth instead of CPU/memory
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: keda
+  labels:
+    name: keda
+    pod-security.kubernetes.io/enforce: restricted
+
+---
+# KEDA Operator Deployment
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keda
+  namespace: argocd
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://kedacore.github.io/charts
+    chart: keda
+    targetRevision: 2.13.0
+    helm:
+      values: |
+        operator:
+          replicas: 2
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+        metricsServer:
+          replicas: 2
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+        admissionWebhooks:
+          enabled: true
+          metricServer:
+            enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keda
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+
+---
+# Alternative: Direct installation using kubectl
+# Uncomment and use this section if not using ArgoCD
+# apiVersion: source.toolkit.fluxcd.io/v1beta2
+# kind: HelmRepository
+# metadata:
+#   name: kedacore
+#   namespace: keda
+# spec:
+#   interval: 1m
+#   url: https://kedacore.github.io/charts
+---
+# apiVersion: helm.toolkit.fluxcd.io/v2beta1
+# kind: HelmRelease
+# metadata:
+#   name: keda
+#   namespace: keda
+# spec:
+#   interval: 5m
+#   chart:
+#     spec:
+#       chart: keda
+#       version: "2.13.0"
+#       sourceRef:
+#         kind: HelmRepository
+#         name: kedacore
+#         namespace: keda
+#   values:
+#     operator:
+#       replicas: 2
+#     metricsServer:
+#       replicas: 2

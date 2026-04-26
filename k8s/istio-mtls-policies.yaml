@@ -1,0 +1,229 @@
+---
+# Istio mTLS Authentication Policies for Zero-Trust Architecture
+# These resources enforce strict mutual TLS authentication between all services
+
+---
+# PeerAuthentication for Backend API (Strict mTLS)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: leaseflow-backend-mtls
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+  mtls:
+    mode: STRICT
+
+---
+# PeerAuthentication for PDF Worker (Strict mTLS)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: pdf-worker-mtls
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: pdf-worker
+  mtls:
+    mode: STRICT
+
+---
+# PeerAuthentication for IoT Worker (Strict mTLS)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: iot-worker-mtls
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: iot-worker
+  mtls:
+    mode: STRICT
+
+---
+# PeerAuthentication for Email Worker (Strict mTLS)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: email-worker-mtls
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: email-worker
+  mtls:
+    mode: STRICT
+
+---
+# PeerAuthentication for Indexer Worker (Strict mTLS)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: indexer-worker-mtls
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: indexer-worker
+  mtls:
+    mode: STRICT
+
+---
+# PeerAuthentication for Redis (Strict mTLS)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: redis-mtls
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  mtls:
+    mode: STRICT
+
+---
+# PeerAuthentication for PostgreSQL (Strict mTLS)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: postgresql-mtls
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: postgresql
+  mtls:
+    mode: STRICT
+
+---
+# Destination Rule for Backend API
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: leaseflow-backend-destination
+  namespace: default
+spec:
+  host: leaseflow-backend-service
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 100
+        connectTimeout: 10s
+        tcpKeepalive:
+          time: 7200s
+          interval: 75s
+    loadBalancer:
+      simple: ROUND_ROBIN
+    outlierDetection:
+      consecutiveErrors: 7
+      interval: 30s
+      baseEjectionTime: 30s
+
+---
+# Destination Rule for Redis
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: redis-destination
+  namespace: default
+spec:
+  host: redis-service
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 50
+        connectTimeout: 5s
+    loadBalancer:
+      simple: ROUND_ROBIN
+
+---
+# Destination Rule for PostgreSQL
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: postgresql-destination
+  namespace: default
+spec:
+  host: postgresql-service
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 50
+        connectTimeout: 10s
+    loadBalancer:
+      simple: ROUND_ROBIN
+
+---
+# Destination Rule for PDF Worker
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: pdf-worker-destination
+  namespace: default
+spec:
+  host: leaseflow-backend-worker-pdf
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    loadBalancer:
+      simple: ROUND_ROBIN
+
+---
+# Destination Rule for IoT Worker
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: iot-worker-destination
+  namespace: default
+spec:
+  host: leaseflow-backend-worker-iot
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    loadBalancer:
+      simple: ROUND_ROBIN
+
+---
+# Destination Rule for Email Worker
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: email-worker-destination
+  namespace: default
+spec:
+  host: leaseflow-backend-worker-email
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    loadBalancer:
+      simple: ROUND_ROBIN
+
+---
+# Destination Rule for Indexer Worker
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: indexer-worker-destination
+  namespace: default
+spec:
+  host: leaseflow-backend-worker-indexer
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    loadBalancer:
+      simple: ROUND_ROBIN

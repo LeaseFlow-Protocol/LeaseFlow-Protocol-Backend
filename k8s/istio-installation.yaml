@@ -1,0 +1,172 @@
+---
+# Istio Service Mesh Installation for Zero-Trust Architecture
+# This manifest installs Istio with strict mTLS enabled for all pod-to-pod communication
+
+---
+# Istio Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: istio-system
+  labels:
+    istio-injection: disabled
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# Istio Operator Installation
+apiVersion: install.istio.io/v1alpha1
+kind: IstioOperator
+metadata:
+  name: leaseflow-istio-operator
+  namespace: istio-system
+spec:
+  profile: default
+  components:
+    pilot:
+      enabled: true
+      k8s:
+        env:
+          - name: PILOT_ENABLE_WORKLOAD_ENTRY_AUTOREGISTRATION
+            value: "true"
+          - name: PILOT_ENABLE_STATUS
+            value: "true"
+          - name: PILOT_TRACE_SAMPLING
+            value: "100"
+        resources:
+          requests:
+            cpu: 500m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+        replicas: 2
+    ingressGateways:
+      - name: istio-ingressgateway
+        enabled: true
+        k8s:
+          service:
+            type: LoadBalancer
+            ports:
+              - name: http2
+                port: 80
+                targetPort: 8080
+              - name: https
+                port: 443
+                targetPort: 8443
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+          replicas: 2
+    egressGateways:
+      - name: istio-egressgateway
+        enabled: true
+        k8s:
+          service:
+            type: ClusterIP
+            ports:
+              - name: http
+                port: 80
+                targetPort: 8080
+              - name: https
+                port: 443
+                targetPort: 8443
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          replicas: 2
+    policy:
+      enabled: true
+    telemetry:
+      enabled: true
+  values:
+    global:
+      # Enable strict mTLS by default
+      mtls:
+        enabled: true
+      # Enable mutual TLS for all services
+      meshConfig:
+        accessLogFile: /dev/stdout
+        enableAutoMtls: true
+        defaultConfig:
+          proxyStatsMatcher:
+            inclusionRegexps:
+              - ".*_cx_.*"
+              - ".*_upstream_.*"
+              - ".*_downstream_.*"
+          holdApplicationUntilProxyStarts: true
+          concurrency: 4
+    sidecarInjectorWebhook:
+      enabled: true
+      alwaysInjectSelector:
+        - matchLabels:
+            istio-injection: "enabled"
+    base:
+      enableCNI: false
+      validationURL: ""
+    pilotAutoscaleEnabled: true
+    pilot:
+      autoscaleEnabled: true
+      autoscaleMin: 2
+      autoscaleMax: 5
+      autoscaleTargetUtilization: 80
+
+---
+# Enable Istio injection for default namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: default
+  labels:
+    istio-injection: enabled
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# Mesh-wide mTLS Policy (Strict Mode)
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default-mtls-strict
+  namespace: istio-system
+spec:
+  mtls:
+    mode: STRICT
+
+---
+# Mesh-wide Destination Rule for mTLS
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: default-mtls-destination
+  namespace: istio-system
+spec:
+  host: "*.local"
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+
+---
+# Istio Role for Admin Access
+apiVersion: rbac.istio.io/v1alpha1
+kind: ClusterRbacConfig
+metadata:
+  name: default
+spec:
+  mode: ON_WITH_INCLUSION
+  inclusion:
+    services:
+      - "*"
+  rules:
+    - services: ["*"]
+      methods: ["*"]

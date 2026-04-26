@@ -6,6 +6,36 @@ process.env.NODE_ENV = 'test';
 process.env.AUTH_JWT_SECRET = 'test-secret';
 process.env.ABANDONED_ASSET_TRACKING_ENABLED = 'true';
 
+// Mock ipfs-http-client to avoid dependency issues in tests
+jest.mock('ipfs-http-client', () => {
+  return {
+    create: jest.fn(() => ({
+      add: jest.fn(),
+      cat: jest.fn(),
+      pin: jest.fn(),
+      ls: jest.fn(),
+    })),
+  };
+}, { virtual: true });
+
+// Mock @socket.io/redis-adapter to avoid dependency issues in tests
+jest.mock('@socket.io/redis-adapter', () => {
+  return {
+    createAdapter: jest.fn(() => ({})),
+  };
+}, { virtual: true });
+
+// Mock redis to avoid dependency issues in tests
+jest.mock('redis', () => {
+  return {
+    createClient: jest.fn(() => ({
+      connect: jest.fn(),
+      on: jest.fn(),
+      quit: jest.fn(),
+    })),
+  };
+}, { virtual: true });
+
 // Mock console methods to reduce test noise
 global.console = {
   ...console,
