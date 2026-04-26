@@ -18,6 +18,22 @@ class AppDatabase {
   }
 
   /**
+   * Close database connection gracefully
+   * @returns {Promise<void>}
+   */
+  async close() {
+    if (this.db) {
+      try {
+        // Close the SQLite database connection
+        this.db.close();
+        console.log('[AppDatabase] Database connection closed');
+      } catch (error) {
+        console.error('[AppDatabase] Error closing database:', error.message);
+      }
+    }
+  }
+
+  /**
    * Ensure the database directory exists for file-backed databases.
    *
    * @returns {void}
@@ -1696,32 +1712,32 @@ class AppDatabase {
    * List all maintenance maintenance expenses for tax deduction report (Issue #30).
    */
   listMaintenanceExpenses(landlordId, year) {
-      const startOfYear = `${year}-01-01`;
-      const endOfYear = `${year}-12-31`;
-      return this.db
-        .prepare(`
+    const startOfYear = `${year}-01-01`;
+    const endOfYear = `${year}-12-31`;
+    return this.db
+      .prepare(`
             SELECT mj.* FROM maintenance_jobs mj
             JOIN leases l ON mj.lease_id = l.id
             WHERE l.landlord_id = ? AND mj.status = 'completed' AND mj.completed_at BETWEEN ? AND ?
         `)
-        .all(landlordId, startOfYear, endOfYear)
-        .map(normalizeMaintenanceJobRow);
+      .all(landlordId, startOfYear, endOfYear)
+      .map(normalizeMaintenanceJobRow);
   }
 
   /**
    * List all protocol fees paid for a specific year and landlord.
    */
   listProtocolFees(landlordId, year) {
-      const startOfYear = `${year}-01-01`;
-      const endOfYear = `${year}-12-31`;
-      return this.db
-        .prepare(`
+    const startOfYear = `${year}-01-01`;
+    const endOfYear = `${year}-12-31`;
+    return this.db
+      .prepare(`
             SELECT rp.protocol_fee, rp.date_paid, rp.lease_id, l.landlord_id
             FROM rent_payments rp
             JOIN leases l ON rp.lease_id = l.id
             WHERE l.landlord_id = ? AND rp.status = 'paid' AND rp.date_paid BETWEEN ? AND ?
         `)
-        .all(landlordId, startOfYear, endOfYear);
+      .all(landlordId, startOfYear, endOfYear);
   }
 
   // ---------------------------------------------------------------------------
@@ -1971,7 +1987,7 @@ class AppDatabase {
    */
   getDlqEvents(options = {}) {
     const { eventType, status, limit = 50, offset = 0 } = options;
-    
+
     let query = `
       SELECT 
         id, original_job_id AS originalJobId, event_type AS eventType,
@@ -1981,29 +1997,29 @@ class AppDatabase {
         created_at AS createdAt, updated_at AS updatedAt
       FROM dlq_events
     `;
-    
+
     const conditions = [];
     const params = [];
-    
+
     if (eventType) {
       conditions.push('event_type = ?');
       params.push(eventType);
     }
-    
+
     if (status) {
       conditions.push('status = ?');
       params.push(status);
     }
-    
+
     if (conditions.length > 0) {
       query += ' WHERE ' + conditions.join(' AND ');
     }
-    
+
     query += ' ORDER BY failed_at DESC LIMIT ? OFFSET ?';
     params.push(limit, offset);
-    
+
     const rows = this.db.prepare(query).all(...params);
-    
+
     return rows.map(row => ({
       ...row,
       eventPayload: JSON.parse(row.eventPayload)
@@ -2017,19 +2033,19 @@ class AppDatabase {
     const now = new Date().toISOString();
     const updateFields = ['status = ?', 'updated_at = ?'];
     const params = [status, now];
-    
+
     if (status === 'retried') {
       updateFields.push('retried_at = ?');
       params.push(now);
     }
-    
+
     if (status === 'resolved') {
       updateFields.push('resolved_at = ?');
       params.push(now);
     }
-    
+
     params.push(eventId);
-    
+
     this.db
       .prepare(`UPDATE dlq_events SET ${updateFields.join(', ')} WHERE id = ?`)
       .run(...params);
@@ -2042,7 +2058,7 @@ class AppDatabase {
     const row = this.db
       .prepare('SELECT last_ingested_ledger FROM ingestion_ledger_tracking WHERE id = ?')
       .get('main');
-    
+
     return row ? row.last_ingested_ledger : 0;
   }
 
@@ -2051,7 +2067,7 @@ class AppDatabase {
    */
   updateLastIngestedLedger(ledgerNumber) {
     const now = new Date().toISOString();
-    
+
     this.db
       .prepare(`
         INSERT INTO ingestion_ledger_tracking (id, last_ingested_ledger, updated_at)
@@ -2100,19 +2116,19 @@ class AppDatabase {
         ORDER BY count DESC
       `)
       .all();
-    
+
     const totalFailed = this.db
       .prepare('SELECT COUNT(*) as count FROM dlq_events WHERE status = ?')
       .get('failed');
-    
+
     const totalRetried = this.db
       .prepare('SELECT COUNT(*) as count FROM dlq_events WHERE status = ?')
       .get('retried');
-    
+
     const totalResolved = this.db
       .prepare('SELECT COUNT(*) as count FROM dlq_events WHERE status = ?')
       .get('resolved');
-    
+
     return {
       byEventType: stats,
       totalFailed: totalFailed.count,

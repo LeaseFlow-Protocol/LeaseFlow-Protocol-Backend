@@ -8,8 +8,10 @@ class GracefulShutdownService {
     this.isShuttingDown = false;
     this.activeConnections = new Set();
     this.backgroundJobs = new Map();
-    this.shutdownTimeout = 60000; // 60 seconds
-    this.healthCheckGracePeriod = 30000; // 30 seconds
+    this.bullMQQueues = new Map();
+    this.shutdownTimeout = 30000; // 30 seconds
+    this.healthCheckGracePeriod = 5000; // 5 seconds
+    this.requestDrainTimeout = 25000; // 25 seconds for request drain
   }
 
   /**
@@ -26,7 +28,7 @@ class GracefulShutdownService {
     // Register signal handlers
     process.on('SIGTERM', () => this.handleShutdown('SIGTERM'));
     process.on('SIGINT', () => this.handleShutdown('SIGINT'));
-    
+
     // Handle uncaught exceptions
     process.on('uncaughtException', (error) => {
       console.error('[GracefulShutdown] Uncaught exception:', error);
@@ -54,7 +56,7 @@ class GracefulShutdownService {
     this.server.on('connection', (socket) => {
       const connectionId = this.generateConnectionId(socket);
       this.activeConnections.add(connectionId);
-      
+
       socket.on('close', () => {
         this.activeConnections.delete(connectionId);
       });
@@ -66,6 +68,29 @@ class GracefulShutdownService {
           this.activeConnections.delete(connectionId);
         }
       });
+    });
+
+    // Add middleware to return 503 during shutdown
+    this.setupShutdownMiddleware();
+  }
+
+  /**
+   * Setup middleware to return 503 for all requests during shutdown
+   */
+  setupShutdownMiddleware() {
+    if (!this.app) return;
+
+    // Insert middleware at the beginning of the stack
+    this.app.use((req, res, next) => {
+      if (this.isShuttingDown) {
+        res.status(503).json({
+          status: 'shutting_down',
+          message: 'Server is shutting down, please retry later',
+          timestamp: new Date().toISOString()
+        });
+        return;
+      }
+      next();
     });
   }
 
@@ -85,6 +110,16 @@ class GracefulShutdownService {
    */
   registerBackgroundJob(name, job) {
     this.backgroundJobs.set(name, job);
+  }
+
+  /**
+   * Register BullMQ queue for graceful shutdown
+   * @param {string} name - Queue name
+   * @param {Object} queue - BullMQ queue instance
+   * @param {Object} worker - BullMQ worker instance (optional)
+   */
+  registerBullMQQueue(name, queue, worker = null) {
+    this.bullMQQueues.set(name, { queue, worker });
   }
 
   /**
@@ -114,32 +149,38 @@ class GracefulShutdownService {
    */
   async performGracefulShutdown() {
     const shutdownStart = Date.now();
-    
+
     try {
-      // Step 1: Stop accepting new connections
+      // Step 1: Stop accepting new connections (return 503)
       await this.stopAcceptingConnections();
-      
-      // Step 2: Wait for active connections to finish (with timeout)
+
+      // Step 2: Pause BullMQ queues to prevent new jobs
+      await this.pauseBullMQQueues();
+
+      // Step 3: Wait for active connections to finish (with timeout)
       await this.waitForActiveConnections();
-      
-      // Step 3: Stop background jobs
+
+      // Step 4: Stop background jobs
       await this.stopBackgroundJobs();
-      
-      // Step 4: Close database connections
+
+      // Step 5: Close BullMQ workers and queues
+      await this.closeBullMQQueues();
+
+      // Step 6: Close database connections
       await this.closeDatabaseConnections();
-      
-      // Step 5: Close Redis connections
+
+      // Step 7: Close Redis connections (including Pub/Sub)
       await this.closeRedisConnections();
-      
-      // Step 6: Stop GraphQL server
+
+      // Step 8: Stop GraphQL server
       await this.stopGraphQLServer();
-      
-      // Step 7: Close HTTP server
+
+      // Step 9: Close HTTP server
       await this.closeHttpServer();
-      
+
       const shutdownDuration = Date.now() - shutdownStart;
       console.log(`[GracefulShutdown] Shutdown completed in ${shutdownDuration}ms`);
-      
+
       process.exit(0);
     } catch (error) {
       console.error('[GracefulShutdown] Shutdown failed:', error);
@@ -152,7 +193,7 @@ class GracefulShutdownService {
    */
   async stopAcceptingConnections() {
     console.log('[GracefulShutdown] Stopping new connections...');
-    
+
     // Mark health check endpoint as shutting down
     if (this.app) {
       this.app.get('/health', (req, res) => {
@@ -173,15 +214,15 @@ class GracefulShutdownService {
    */
   async waitForActiveConnections() {
     console.log(`[GracefulShutdown] Waiting for ${this.activeConnections.size} active connections...`);
-    
+
     const startTime = Date.now();
-    const maxWaitTime = this.shutdownTimeout - 10000; // Leave 10s for other operations
-    
+    const maxWaitTime = this.requestDrainTimeout; // Use dedicated request drain timeout
+
     while (this.activeConnections.size > 0 && (Date.now() - startTime) < maxWaitTime) {
       console.log(`[GracefulShutdown] Still waiting for ${this.activeConnections.size} connections...`);
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    
+
     if (this.activeConnections.size > 0) {
       console.warn(`[GracefulShutdown] Force closing ${this.activeConnections.size} remaining connections`);
       this.activeConnections.clear();
@@ -189,23 +230,83 @@ class GracefulShutdownService {
   }
 
   /**
+   * Pause BullMQ queues to prevent new jobs from being processed
+   */
+  async pauseBullMQQueues() {
+    console.log('[GracefulShutdown] Pausing BullMQ queues...');
+
+    const pausePromises = [];
+
+    for (const [name, { queue, worker }] of this.bullMQQueues) {
+      console.log(`[GracefulShutdown] Pausing queue: ${name}`);
+
+      if (worker && typeof worker.pause === 'function') {
+        pausePromises.push(
+          Promise.resolve().then(() => worker.pause())
+            .catch(error => console.error(`[GracefulShutdown] Error pausing worker ${name}:`, error))
+        );
+      }
+
+      if (queue && typeof queue.pause === 'function') {
+        pausePromises.push(
+          Promise.resolve().then(() => queue.pause())
+            .catch(error => console.error(`[GracefulShutdown] Error pausing queue ${name}:`, error))
+        );
+      }
+    }
+
+    await Promise.all(pausePromises);
+    console.log('[GracefulShutdown] All BullMQ queues paused');
+  }
+
+  /**
+   * Close BullMQ workers and queues
+   */
+  async closeBullMQQueues() {
+    console.log('[GracefulShutdown] Closing BullMQ workers and queues...');
+
+    const closePromises = [];
+
+    for (const [name, { queue, worker }] of this.bullMQQueues) {
+      console.log(`[GracefulShutdown] Closing queue: ${name}`);
+
+      if (worker && typeof worker.close === 'function') {
+        closePromises.push(
+          Promise.resolve().then(() => worker.close())
+            .catch(error => console.error(`[GracefulShutdown] Error closing worker ${name}:`, error))
+        );
+      }
+
+      if (queue && typeof queue.close === 'function') {
+        closePromises.push(
+          Promise.resolve().then(() => queue.close())
+            .catch(error => console.error(`[GracefulShutdown] Error closing queue ${name}:`, error))
+        );
+      }
+    }
+
+    await Promise.all(closePromises);
+    console.log('[GracefulShutdown] All BullMQ workers and queues closed');
+  }
+
+  /**
    * Stop all background jobs
    */
   async stopBackgroundJobs() {
     console.log('[GracefulShutdown] Stopping background jobs...');
-    
+
     const stopPromises = [];
-    
+
     for (const [name, job] of this.backgroundJobs) {
       console.log(`[GracefulShutdown] Stopping job: ${name}`);
-      
+
       if (job && typeof job.stop === 'function') {
         stopPromises.push(
           Promise.resolve().then(() => job.stop())
             .catch(error => console.error(`[GracefulShutdown] Error stopping job ${name}:`, error))
         );
       }
-      
+
       // Handle Soroban indexer worker specifically
       if (name === 'sorobanIndexer' && job && typeof job.pause === 'function') {
         stopPromises.push(
@@ -214,7 +315,7 @@ class GracefulShutdownService {
         );
       }
     }
-    
+
     await Promise.all(stopPromises);
     console.log('[GracefulShutdown] All background jobs stopped');
   }
@@ -224,7 +325,7 @@ class GracefulShutdownService {
    */
   async closeDatabaseConnections() {
     console.log('[GracefulShutdown] Closing database connections...');
-    
+
     if (this.dependencies.database) {
       try {
         await this.dependencies.database.close();
@@ -240,7 +341,7 @@ class GracefulShutdownService {
    */
   async closeRedisConnections() {
     console.log('[GracefulShutdown] Closing Redis connections...');
-    
+
     if (this.dependencies.redisService) {
       try {
         const redis = await this.dependencies.redisService.getWorkingClient();
@@ -257,7 +358,7 @@ class GracefulShutdownService {
    */
   async stopGraphQLServer() {
     console.log('[GracefulShutdown] Stopping GraphQL server...');
-    
+
     if (this.dependencies.apolloServer) {
       try {
         await this.dependencies.apolloServer.stop();
@@ -273,7 +374,7 @@ class GracefulShutdownService {
    */
   async closeHttpServer() {
     console.log('[GracefulShutdown] Closing HTTP server...');
-    
+
     if (this.server) {
       return new Promise((resolve) => {
         this.server.close((error) => {

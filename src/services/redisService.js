@@ -7,7 +7,9 @@ class RedisService {
   constructor(config) {
     this.config = config;
     this.client = null;
+    this.subscriber = null;
     this.isConnected = false;
+    this.subscriptions = new Map();
   }
 
   /**
@@ -75,6 +77,22 @@ class RedisService {
    * Disconnect from Redis
    */
   async disconnect() {
+    // Unsubscribe from all Pub/Sub channels
+    await this.unsubscribeAll();
+
+    // Close subscriber connection
+    if (this.subscriber) {
+      try {
+        await this.subscriber.quit();
+        console.log('[RedisService] Redis subscriber disconnected');
+      } catch (error) {
+        console.error('[RedisService] Error during subscriber disconnection:', error.message);
+      } finally {
+        this.subscriber = null;
+      }
+    }
+
+    // Close main client connection
     if (this.client) {
       try {
         await this.client.quit();
@@ -84,6 +102,78 @@ class RedisService {
       } finally {
         this.client = null;
         this.isConnected = false;
+      }
+    }
+  }
+
+  /**
+   * Subscribe to a Redis Pub/Sub channel
+   * @param {string} channel - Channel name
+   * @param {Function} callback - Callback function for messages
+   */
+  async subscribe(channel, callback) {
+    if (!this.subscriber) {
+      // Create a dedicated subscriber connection
+      this.subscriber = new Redis({
+        host: this.config.redis.host,
+        port: this.config.redis.port,
+        password: this.config.redis.password,
+        retryDelayOnFailover: 100,
+        maxRetriesPerRequest: 3,
+        lazyConnect: true,
+        keyPrefix: 'leaseflow:',
+      });
+
+      this.subscriber.on('connect', () => {
+        console.log('[RedisService] Subscriber connected to Redis');
+      });
+
+      this.subscriber.on('error', (err) => {
+        console.error('[RedisService] Subscriber connection error:', err);
+      });
+    }
+
+    try {
+      await this.subscriber.connect();
+      await this.subscriber.subscribe(channel, (message) => {
+        callback(message, channel);
+      });
+
+      this.subscriptions.set(channel, callback);
+      console.log(`[RedisService] Subscribed to channel: ${channel}`);
+    } catch (error) {
+      console.error(`[RedisService] Error subscribing to channel ${channel}:`, error.message);
+    }
+  }
+
+  /**
+   * Unsubscribe from a specific channel
+   * @param {string} channel - Channel name
+   */
+  async unsubscribe(channel) {
+    if (this.subscriber && this.subscriptions.has(channel)) {
+      try {
+        await this.subscriber.unsubscribe(channel);
+        this.subscriptions.delete(channel);
+        console.log(`[RedisService] Unsubscribed from channel: ${channel}`);
+      } catch (error) {
+        console.error(`[RedisService] Error unsubscribing from channel ${channel}:`, error.message);
+      }
+    }
+  }
+
+  /**
+   * Unsubscribe from all channels
+   */
+  async unsubscribeAll() {
+    if (this.subscriber && this.subscriptions.size > 0) {
+      try {
+        const channels = Array.from(this.subscriptions.keys());
+        await this.subscriber.unsubscribe(...channels);
+        this.subscriptions.clear();
+        console.log(`[RedisService] Unsubscribed from ${channels.length} channels`);
+      } catch (error) {
+        console.error('[RedisService] Error unsubscribing from all channels:', error.message);
       }
     }
   }
@@ -186,7 +276,7 @@ class RedisService {
    */
   createMockClient() {
     const mockCache = new Map();
-    
+
     return {
       get: async (key) => mockCache.get(key) || null,
       setex: async (key, ttl, value) => {
@@ -223,7 +313,7 @@ class RedisService {
   async getWorkingClient() {
     const client = await this.getClient();
     if (client) return client;
-    
+
     // Return mock client if Redis is not available
     console.warn('[RedisService] Using mock Redis client - caching is in-memory only');
     return this.createMockClient();
