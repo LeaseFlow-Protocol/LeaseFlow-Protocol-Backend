@@ -1,0 +1,514 @@
+---
+# Strict Kubernetes Network Policies for Zero-Trust Architecture
+# These policies block all unencrypted traffic and enforce Istio sidecar communication only
+
+---
+# Default Deny All Policy (Zero-Trust Baseline)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: default
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# Allow Istio Sidecar Injection and Control Plane Communication
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-istio-control-plane
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      istio-injection: enabled
+  policyTypes:
+    - Egress
+  egress:
+    # Allow communication with Istio control plane
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012
+        - protocol: TCP
+          port: 15017
+        - protocol: TCP
+          port: 443
+    # Allow DNS resolution
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# Backend API Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: leaseflow-backend-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: leaseflow-backend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow traffic from Istio ingress gateway (public API)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+          podSelector:
+            matchLabels:
+              app: istio-ingressgateway
+      ports:
+        - protocol: TCP
+          port: 4000
+    # Allow traffic from gateway (if using Apollo Federation)
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-gateway
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    # Allow communication with PostgreSQL (via Istio mTLS)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Allow communication with Redis (via Istio mTLS)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Allow communication with Istio control plane
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012
+        - protocol: TCP
+          port: 15017
+        - protocol: TCP
+          port: 443
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# PDF Worker Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: pdf-worker-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: leaseflow-backend
+      component: pdf-worker
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only allow traffic from backend API (via Istio mTLS)
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-backend
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    # Allow communication with Redis (via Istio mTLS)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Allow communication with Istio control plane
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012
+        - protocol: TCP
+          port: 15017
+        - protocol: TCP
+          port: 443
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# IoT Worker Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: iot-worker-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: leaseflow-backend
+      component: iot-worker
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only allow traffic from backend API (via Istio mTLS)
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-backend
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    # Allow communication with Redis (via Istio mTLS)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Allow outbound webhook calls to external IoT services (via Istio egress gateway)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+          podSelector:
+            matchLabels:
+              app: istio-egressgateway
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80
+    # Allow communication with Istio control plane
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012
+        - protocol: TCP
+          port: 15017
+        - protocol: TCP
+          port: 443
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# Email Worker Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: email-worker-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: leaseflow-backend
+      component: email-worker
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only allow traffic from backend API (via Istio mTLS)
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-backend
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    # Allow communication with Redis (via Istio mTLS)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Allow outbound SMTP calls (via Istio egress gateway)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+          podSelector:
+            matchLabels:
+              app: istio-egressgateway
+      ports:
+        - protocol: TCP
+          port: 587
+        - protocol: TCP
+          port: 465
+    # Allow communication with Istio control plane
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012
+        - protocol: TCP
+          port: 15017
+        - protocol: TCP
+          port: 443
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# Indexer Worker Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: indexer-worker-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: leaseflow-backend
+      component: indexer-worker
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only allow traffic from backend API (via Istio mTLS)
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-backend
+      ports:
+        - protocol: TCP
+          port: 4000
+  egress:
+    # Allow communication with Redis (via Istio mTLS)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    # Allow communication with PostgreSQL (via Istio mTLS)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: postgresql
+      ports:
+        - protocol: TCP
+          port: 5432
+    # Allow outbound calls to Stellar/Soroban network (via Istio egress gateway)
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+          podSelector:
+            matchLabels:
+              app: istio-egressgateway
+      ports:
+        - protocol: TCP
+          port: 443
+    # Allow communication with Istio control plane
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012
+        - protocol: TCP
+          port: 15017
+        - protocol: TCP
+          port: 443
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# Redis Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: redis-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only allow traffic from LeaseFlow services (via Istio mTLS)
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-backend
+      ports:
+        - protocol: TCP
+          port: 6379
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-backend
+              component: pdf-worker
+      ports:
+        - protocol: TCP
+          port: 6379
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-backend
+              component: iot-worker
+      ports:
+        - protocol: TCP
+          port: 6379
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-backend
+              component: email-worker
+      ports:
+        - protocol: TCP
+          port: 6379
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-backend
+              component: indexer-worker
+      ports:
+        - protocol: TCP
+          port: 6379
+  egress:
+    # Allow communication with Istio control plane
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012
+        - protocol: TCP
+          port: 15017
+        - protocol: TCP
+          port: 443
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# PostgreSQL Network Policy
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgresql-netpol
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      app: postgresql
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Only allow traffic from LeaseFlow services (via Istio mTLS)
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-backend
+      ports:
+        - protocol: TCP
+          port: 5432
+    - from:
+        - podSelector:
+            matchLabels:
+              app: leaseflow-backend
+              component: indexer-worker
+      ports:
+        - protocol: TCP
+          port: 5432
+  egress:
+    # Allow communication with Istio control plane
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              name: istio-system
+      ports:
+        - protocol: TCP
+          port: 15012
+        - protocol: TCP
+          port: 15017
+        - protocol: TCP
+          port: 443
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53

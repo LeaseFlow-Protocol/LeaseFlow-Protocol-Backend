@@ -1,0 +1,370 @@
+---
+# Istio Authorization Policies for Zero-Trust Service-to-Service Access
+# These policies enforce strict authorization rules - only authorized services can communicate
+
+---
+# Allow Backend API to access PostgreSQL
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: backend-to-postgresql
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: postgresql
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-backend-worker
+              - cluster.local/ns/default/sa/leaseflow-backend
+      to:
+        - operation:
+            ports:
+              - "5432"
+
+---
+# Allow Backend API to access Redis
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: backend-to-redis
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-backend-worker
+              - cluster.local/ns/default/sa/leaseflow-backend
+      to:
+        - operation:
+            ports:
+              - "6379"
+
+---
+# Allow PDF Worker to access Redis
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: pdf-worker-to-redis
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-backend-worker
+      to:
+        - operation:
+            ports:
+              - "6379"
+      when:
+        - key: source.labels
+          values:
+            - component: pdf-worker
+
+---
+# Allow IoT Worker to access Redis
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: iot-worker-to-redis
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-backend-worker
+      to:
+        - operation:
+            ports:
+              - "6379"
+      when:
+        - key: source.labels
+          values:
+            - component: iot-worker
+
+---
+# Allow Email Worker to access Redis
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: email-worker-to-redis
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-backend-worker
+      to:
+        - operation:
+            ports:
+              - "6379"
+      when:
+        - key: source.labels
+          values:
+            - component: email-worker
+
+---
+# Allow Indexer Worker to access Redis
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: indexer-worker-to-redis
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-backend-worker
+      to:
+        - operation:
+            ports:
+              - "6379"
+      when:
+        - key: source.labels
+          values:
+            - component: indexer-worker
+
+---
+# Allow Indexer Worker to access PostgreSQL
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: indexer-worker-to-postgresql
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: postgresql
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-backend-worker
+      to:
+        - operation:
+            ports:
+              - "5432"
+      when:
+        - key: source.labels
+          values:
+            - component: indexer-worker
+
+---
+# Allow Backend API to accept traffic from Istio Ingress Gateway
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: ingress-to-backend
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account
+      to:
+        - operation:
+            ports:
+              - "4000"
+
+---
+# Allow Backend API to accept traffic from Gateway (if using Apollo Federation)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: gateway-to-backend
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-gateway
+      to:
+        - operation:
+            ports:
+              - "4000"
+
+---
+# Allow Workers to accept traffic from Backend API only
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: backend-to-pdf-worker
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: pdf-worker
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-backend
+      to:
+        - operation:
+            ports:
+              - "4000"
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: backend-to-iot-worker
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: iot-worker
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-backend
+      to:
+        - operation:
+            ports:
+              - "4000"
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: backend-to-email-worker
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: email-worker
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-backend
+      to:
+        - operation:
+            ports:
+              - "4000"
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: backend-to-indexer-worker
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: indexer-worker
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals:
+              - cluster.local/ns/default/sa/leaseflow-backend
+      to:
+        - operation:
+            ports:
+              - "4000"
+
+---
+# Deny all other traffic to PostgreSQL (default deny)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all-postgresql
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: postgresql
+  action: DENY
+
+---
+# Deny all other traffic to Redis (default deny)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all-redis
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  action: DENY
+
+---
+# Deny all other traffic to Backend API (default deny)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all-backend
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+  action: DENY
+
+---
+# Deny all other traffic to Workers (default deny)
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: deny-all-workers
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+  action: DENY
+  rules:
+    - from:
+        - source:
+            notPrincipals:
+              - cluster.local/ns/default/sa/leaseflow-backend
+              - cluster.local/ns/istio-system/sa/istio-ingressgateway-service-account

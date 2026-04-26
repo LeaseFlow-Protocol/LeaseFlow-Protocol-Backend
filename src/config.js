@@ -4,9 +4,9 @@ const DEFAULT_CONTRACT_ID =
   "CAEGD57WVTVQSYWYB23AISBW334QO7WNA5XQ56S45GH6BP3D2AVHKUG4";
 
 
- /**
-  *  Load runtime configuration from environment variables.
- */
+/**
+ *  Load runtime configuration from environment variables.
+*/
 function loadConfig(env = process.env) {
   // --- 1. Validation Logic ---
   // In a professional setup, we check for critical keys early.
@@ -22,11 +22,27 @@ function loadConfig(env = process.env) {
       audience: env.AUTH_JWT_AUDIENCE || "leaseflow-users",
     },
     database: {
+      // SQLite configuration for local development
       filename:
         env.DATABASE_FILENAME ||
         (env.NODE_ENV === "test"
           ? ":memory:"
           : path.join(process.cwd(), "data", "leaseflow-protocol.sqlite")),
+      // PostgreSQL configuration for production with mTLS
+      postgresql: {
+        host: env.DB_HOST || 'localhost',
+        port: Number(env.DB_PORT || 5432),
+        database: env.DB_NAME || 'leaseflow',
+        user: env.DB_USER || 'leaseflow',
+        password: env.DB_PASSWORD || '',
+        // sslmode=verify-full enforces strict TLS with certificate verification
+        sslmode: env.DB_SSL_MODE || 'verify-full',
+        ssl: env.DB_SSL === 'true' || env.NODE_ENV === 'production',
+        // Certificate paths for mTLS verification
+        sslca: env.DB_SSL_CA,
+        sslcert: env.DB_SSL_CERT,
+        sslkey: env.DB_SSL_KEY,
+      },
     },
     // --- Redis Configuration ---
     redis: {

@@ -1,0 +1,368 @@
+---
+# Worker Deployments for BullMQ Processing
+# These deployments are scaled by KEDA based on Redis queue depth
+
+---
+# PDF Generation Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leaseflow-backend-worker-pdf
+  namespace: default
+  labels:
+    app: leaseflow-backend
+    component: pdf-worker
+spec:
+  replicas: 0  # KEDA will manage replicas
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: pdf-worker
+  template:
+    metadata:
+      labels:
+        app: leaseflow-backend
+        component: pdf-worker
+    spec:
+      serviceAccountName: leaseflow-backend-worker
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: pdf-worker
+          image: "docker.io/leaseflow/backend:latest"
+          imagePullPolicy: IfNotPresent
+          command: ["node", "worker.js"]
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: WORKER_TYPE
+              value: "pdf-generation"
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: leaseflow-backend-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: leaseflow-backend-config
+                  key: REDIS_PORT
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: leaseflow-backend-secrets
+                  key: REDIS_PASSWORD
+            - name: REDIS_TLS
+              value: "true"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+      terminationGracePeriodSeconds: 60
+
+---
+# IoT Webhook Dispatcher Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leaseflow-backend-worker-iot
+  namespace: default
+  labels:
+    app: leaseflow-backend
+    component: iot-worker
+spec:
+  replicas: 0  # KEDA will manage replicas
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: iot-worker
+  template:
+    metadata:
+      labels:
+        app: leaseflow-backend
+        component: iot-worker
+    spec:
+      serviceAccountName: leaseflow-backend-worker
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: iot-worker
+          image: "docker.io/leaseflow/backend:latest"
+          imagePullPolicy: IfNotPresent
+          command: ["node", "worker.js"]
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: WORKER_TYPE
+              value: "iot-dispatcher"
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: leaseflow-backend-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: leaseflow-backend-config
+                  key: REDIS_PORT
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: leaseflow-backend-secrets
+                  key: REDIS_PASSWORD
+            - name: REDIS_TLS
+              value: "true"
+            - name: IOT_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: leaseflow-backend-secrets
+                  key: IOT_WEBHOOK_SECRET
+            - name: IOT_BACKEND_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: leaseflow-backend-config
+                  key: IOT_BACKEND_URL
+          resources:
+            limits:
+              cpu: 500m
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+      terminationGracePeriodSeconds: 60
+
+---
+# Email Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leaseflow-backend-worker-email
+  namespace: default
+  labels:
+    app: leaseflow-backend
+    component: email-worker
+spec:
+  replicas: 0  # KEDA will manage replicas
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: email-worker
+  template:
+    metadata:
+      labels:
+        app: leaseflow-backend
+        component: email-worker
+    spec:
+      serviceAccountName: leaseflow-backend-worker
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: email-worker
+          image: "docker.io/leaseflow/backend:latest"
+          imagePullPolicy: IfNotPresent
+          command: ["node", "worker.js"]
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: WORKER_TYPE
+              value: "email"
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: leaseflow-backend-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: leaseflow-backend-config
+                  key: REDIS_PORT
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: leaseflow-backend-secrets
+                  key: REDIS_PASSWORD
+            - name: REDIS_TLS
+              value: "true"
+            - name: SMTP_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: leaseflow-backend-config
+                  key: SMTP_HOST
+            - name: SMTP_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: leaseflow-backend-config
+                  key: SMTP_PORT
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: leaseflow-backend-secrets
+                  key: SMTP_USER
+            - name: SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: leaseflow-backend-secrets
+                  key: SMTP_PASS
+          resources:
+            limits:
+              cpu: 500m
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+      terminationGracePeriodSeconds: 60
+
+---
+# Indexer Worker Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: leaseflow-backend-worker-indexer
+  namespace: default
+  labels:
+    app: leaseflow-backend
+    component: indexer-worker
+spec:
+  replicas: 0  # KEDA will manage replicas
+  selector:
+    matchLabels:
+      app: leaseflow-backend
+      component: indexer-worker
+  template:
+    metadata:
+      labels:
+        app: leaseflow-backend
+        component: indexer-worker
+    spec:
+      serviceAccountName: leaseflow-backend-worker
+      securityContext:
+        fsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: indexer-worker
+          image: "docker.io/leaseflow/backend:latest"
+          imagePullPolicy: IfNotPresent
+          command: ["node", "worker.js"]
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: WORKER_TYPE
+              value: "indexer"
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: leaseflow-backend-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: leaseflow-backend-config
+                  key: REDIS_PORT
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: leaseflow-backend-secrets
+                  key: REDIS_PASSWORD
+            - name: REDIS_TLS
+              value: "true"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /app/logs
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+      terminationGracePeriodSeconds: 60
+
+---
+# Worker Service Account
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: leaseflow-backend-worker
+  namespace: default
+  labels:
+    app: leaseflow-backend
+    component: worker
