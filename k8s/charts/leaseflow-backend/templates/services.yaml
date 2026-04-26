@@ -1,0 +1,72 @@
+{{- if .Values.argoRollouts.enabled -}}
+# Active Service - Points to the currently live version (Blue or Green)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "leaseflow-backend.fullname" . }}-active
+  labels:
+    {{- include "leaseflow-backend.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: {{ .Values.metrics.prometheus.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "leaseflow-backend.selectorLabels" . | nindent 4 }}
+
+---
+# Preview Service - Points to the new version for testing (Green)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "leaseflow-backend.fullname" . }}-preview
+  labels:
+    {{- include "leaseflow-backend.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: {{ .Values.metrics.prometheus.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "leaseflow-backend.selectorLabels" . | nindent 4 }}
+    rollout-status: bluegreen
+
+---
+{{- else -}}
+# Standard Service (when Argo Rollouts is disabled)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "leaseflow-backend.fullname" . }}
+  labels:
+    {{- include "leaseflow-backend.labels" . | nindent 4 }}
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    - port: {{ .Values.metrics.prometheus.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "leaseflow-backend.selectorLabels" . | nindent 4 }}
+{{- end }}

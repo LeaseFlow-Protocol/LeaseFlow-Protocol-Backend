@@ -1,0 +1,260 @@
+# Vault Dynamic Database Credentials Configuration
+# This configuration sets up Vault's database secrets engine for dynamic credential generation
+# Credentials will automatically rotate every 24 hours
+# Apply with: kubectl apply -f k8s/vault-dynamic-db-config.yaml
+
+---
+# Vault Database Secrets Engine Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-database-config
+  namespace: leaseflow
+data:
+  setup.sh: |
+    #!/bin/bash
+    set -e
+    
+    VAULT_ADDR="${VAULT_ADDR:-https://vault.example.com:8200}"
+    DB_HOST="${DB_HOST:-postgresql-service}"
+    DB_PORT="${DB_PORT:-5432}"
+    DB_NAME="${DB_NAME:-leaseflow}"
+    DB_ADMIN_USER="${DB_ADMIN_USER:-postgres}"
+    DB_ADMIN_PASSWORD="${DB_ADMIN_PASSWORD}"
+    
+    echo "Configuring Vault database secrets engine..."
+    
+    # Enable database secrets engine
+    vault secrets enable database
+    
+    # Configure PostgreSQL database connection
+    vault write database/config/leaseflow-backend \
+      plugin_name=postgresql-database-plugin \
+      connection_url="postgresql://{{username}}:{{password}}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable" \
+      allowed_roles="leaseflow-backend" \
+      username="${DB_ADMIN_USER}" \
+      password="${DB_ADMIN_PASSWORD}" \
+      verify_connection=false
+    
+    # Create role for dynamic credentials with 24-hour TTL
+    vault write database/roles/leaseflow-backend \
+      db_name=leaseflow-backend \
+      creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO \"{{name}}\"; GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO \"{{name}}\"; ALTER ROLE \"{{name}}\" IN DATABASE \"${DB_NAME}\" SET search_path TO public;" \
+      default_ttl="24h" \
+      max_ttl="24h" \
+      revocation_statements="REVOKE SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public FROM \"{{name}}\"; REVOKE USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public FROM \"{{name}}\"; DROP ROLE IF EXISTS \"{{name}}\";"
+    
+    # Configure automatic credential rotation
+    vault write database/rotate-root/leaseflow-backend
+    
+    echo "Database secrets engine configured successfully"
+    echo "Dynamic credentials will rotate every 24 hours"
+    echo "Test with: vault read database/creds/leaseflow-backend"
+
+---
+# Vault Database Role Configuration with Least Privilege
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-db-roles
+  namespace: leaseflow
+data:
+  # Role for application with read-write access
+  leaseflow-backend-role.hcl: |
+    path "database/creds/leaseflow-backend" {
+      capabilities = ["read"]
+    }
+    
+    # Allow lease renewal
+    path "database/creds/leaseflow-backend" {
+      capabilities = ["update"]
+      lease_renewal = true
+    }
+  
+  # Role for migration with elevated privileges
+  leaseflow-migration-role.hcl: |
+    path "database/creds/leaseflow-migration" {
+      capabilities = ["read"]
+    }
+    
+    path "database/creds/leaseflow-migration" {
+      capabilities = ["update"]
+      lease_renewal = true
+    }
+  
+  # Role for read-only access (for reporting/analytics)
+  leaseflow-readonly-role.hcl: |
+    path "database/creds/leaseflow-readonly" {
+      capabilities = ["read"]
+    }
+    
+    path "database/creds/leaseflow-readonly" {
+      capabilities = ["update"]
+      lease_renewal = true
+    }
+
+---
+# Vault Database Migration Role Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-migration-db-config
+  namespace: leaseflow
+data:
+  migration-setup.sh: |
+    #!/bin/bash
+    set -e
+    
+    VAULT_ADDR="${VAULT_ADDR:-https://vault.example.com:8200}"
+    DB_HOST="${DB_HOST:-postgresql-service}"
+    DB_PORT="${DB_PORT:-5432}"
+    DB_NAME="${DB_NAME:-leaseflow}"
+    DB_ADMIN_USER="${DB_ADMIN_USER:-postgres}"
+    DB_ADMIN_PASSWORD="${DB_ADMIN_PASSWORD}"
+    
+    echo "Configuring Vault database secrets engine for migrations..."
+    
+    # Configure PostgreSQL database connection for migration role
+    vault write database/config/leaseflow-migration \
+      plugin_name=postgresql-database-plugin \
+      connection_url="postgresql://{{username}}:{{password}}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable" \
+      allowed_roles="leaseflow-migration" \
+      username="${DB_ADMIN_USER}" \
+      password="${DB_ADMIN_PASSWORD}" \
+      verify_connection=false
+    
+    # Create role for migration with elevated privileges
+    vault write database/roles/leaseflow-migration \
+      db_name=leaseflow-migration \
+      creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{{name}}\"; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{{name}}\"; GRANT CREATE ON SCHEMA public TO \"{{name}}\"; ALTER ROLE \"{{name}}\" IN DATABASE \"${DB_NAME}\" SET search_path TO public;" \
+      default_ttl="1h" \
+      max_ttl="2h" \
+      revocation_statements="REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM \"{{name}}\"; REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM \"{{name}}\"; REVOKE CREATE ON SCHEMA public FROM \"{{name}}\"; DROP ROLE IF EXISTS \"{{name}}\";"
+    
+    echo "Migration database role configured successfully"
+    echo "Migration credentials will expire after 2 hours"
+
+---
+# Vault Database Read-Only Role Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-readonly-db-config
+  namespace: leaseflow
+data:
+  readonly-setup.sh: |
+    #!/bin/bash
+    set -e
+    
+    VAULT_ADDR="${VAULT_ADDR:-https://vault.example.com:8200}"
+    DB_HOST="${DB_HOST:-postgresql-service}"
+    DB_PORT="${DB_PORT:-5432}"
+    DB_NAME="${DB_NAME:-leaseflow}"
+    DB_ADMIN_USER="${DB_ADMIN_USER:-postgres}"
+    DB_ADMIN_PASSWORD="${DB_ADMIN_PASSWORD}"
+    
+    echo "Configuring Vault database secrets engine for read-only access..."
+    
+    # Configure PostgreSQL database connection for read-only role
+    vault write database/config/leaseflow-readonly \
+      plugin_name=postgresql-database-plugin \
+      connection_url="postgresql://{{username}}:{{password}}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=disable" \
+      allowed_roles="leaseflow-readonly" \
+      username="${DB_ADMIN_USER}" \
+      password="${DB_ADMIN_PASSWORD}" \
+      verify_connection=false
+    
+    # Create role for read-only access
+    vault write database/roles/leaseflow-readonly \
+      db_name=leaseflow-readonly \
+      creation_statements="CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}'; GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"{{name}}\"; GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO \"{{name}}\"; ALTER ROLE \"{{name}}\" IN DATABASE \"${DB_NAME}\" SET search_path TO public;" \
+      default_ttl="24h" \
+      max_ttl="24h" \
+      revocation_statements="REVOKE SELECT ON ALL TABLES IN SCHEMA public FROM \"{{name}}\"; REVOKE USAGE ON ALL SEQUENCES IN SCHEMA public FROM \"{{name}}\"; DROP ROLE IF EXISTS \"{{name}}\";"
+    
+    echo "Read-only database role configured successfully"
+
+---
+# Vault Credential Rotation Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vault-rotation-config
+  namespace: leaseflow
+data:
+  rotation-policy.hcl: |
+    # Configure automatic credential rotation
+    # This policy ensures credentials are rotated every 24 hours
+    
+    path "database/rotate-role/leaseflow-backend" {
+      capabilities = ["update"]
+    }
+    
+    path "database/rotate-role/leaseflow-migration" {
+      capabilities = ["update"]
+    }
+    
+    path "database/rotate-role/leaseflow-readonly" {
+      capabilities = ["update"]
+    }
+
+---
+# CronJob for Automatic Credential Rotation
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vault-credential-rotation
+  namespace: leaseflow
+spec:
+  schedule: "0 2 * * *"  # Run daily at 2 AM
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: leaseflow-backend
+          containers:
+            - name: vault-rotator
+              image: hashicorp/vault:1.15.0
+              command:
+                - sh
+                - -c
+                - |
+                  #!/bin/sh
+                  set -e
+                  
+                  VAULT_ADDR="${VAULT_ADDR:-https://vault.example.com:8200}"
+                  
+                  echo "Starting credential rotation..."
+                  
+                  # Authenticate to Vault
+                  export VAULT_TOKEN=$(vault write -field=token auth/kubernetes/login role=leaseflow-backend jwt=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token))
+                  
+                  # Rotate database credentials
+                  echo "Rotating leaseflow-backend database credentials..."
+                  vault write database/rotate-role/leaseflow-backend
+                  
+                  echo "Rotating leaseflow-migration database credentials..."
+                  vault write database/rotate-role/leaseflow-migration
+                  
+                  echo "Rotating leaseflow-readonly database credentials..."
+                  vault write database/rotate-role/leaseflow-readonly
+                  
+                  echo "Credential rotation completed successfully"
+                  
+                  # Revoke token
+                  vault token revoke -self
+              env:
+                - name: VAULT_ADDR
+                  value: "https://vault.example.com:8200"
+                - name: VAULT_SKIP_VERIFY
+                  value: "false"
+              resources:
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+                requests:
+                  cpu: 50m
+                  memory: 32Mi
+          restartPolicy: OnFailure

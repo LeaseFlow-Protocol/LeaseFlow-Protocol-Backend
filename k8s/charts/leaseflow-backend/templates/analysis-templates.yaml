@@ -1,0 +1,230 @@
+{{- if .Values.argoRollouts.enabled -}}
+# AnalysisTemplate for error spike detection and auto-rollback
+# This template analyzes the new version before and after promotion
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "leaseflow-backend.fullname" . }}-analysis
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: success-rate
+      interval: 30s
+      count: 10
+      # Success rate must be above 95%
+      successCondition: result[0] >= 0.95
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus-service.monitoring.svc:9090
+          query: |
+            sum(rate(http_requests_total{{
+              service="{{ args.service-name }}",
+              status_code!~"5.."
+            }}[{{ interval }}]))
+            /
+            sum(rate(http_requests_total{{
+              service="{{ args.service-name }}"
+            }}[{{ interval }}]))
+    - name: error-rate
+      interval: 30s
+      count: 10
+      # Error rate must be below 5%
+      successCondition: result[0] <= 0.05
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus-service.monitoring.svc:9090
+          query: |
+            sum(rate(http_requests_total{{
+              service="{{ args.service-name }}",
+              status_code=~"5.."
+            }}[{{ interval }}]))
+            /
+            sum(rate(http_requests_total{{
+              service="{{ args.service-name }}"
+            }}[{{ interval }}]))
+    - name: latency-p95
+      interval: 30s
+      count: 10
+      # P95 latency must be below 2 seconds
+      successCondition: result[0] < 2000
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus-service.monitoring.svc:9090
+          query: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_seconds_bucket{{
+                service="{{ args.service-name }}"
+              }}[{{ interval }}])) by (le)
+            )
+    - name: latency-p99
+      interval: 30s
+      count: 10
+      # P99 latency must be below 5 seconds
+      successCondition: result[0] < 5000
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus-service.monitoring.svc:9090
+          query: |
+            histogram_quantile(0.99,
+              sum(rate(http_request_duration_seconds_bucket{{
+                service="{{ args.service-name }}"
+              }}[{{ interval }}])) by (le)
+            )
+    - name: cpu-usage
+      interval: 30s
+      count: 10
+      # CPU usage must be below 80%
+      successCondition: result[0] < 80
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus-service.monitoring.svc:9090
+          query: |
+            avg(rate(container_cpu_usage_seconds_total{{
+              container="{{ .Chart.Name }}",
+              pod=~"{{ args.service-name }}-.*"
+            }}[{{ interval }}])) * 100
+    - name: memory-usage
+      interval: 30s
+      count: 10
+      # Memory usage must be below 85%
+      successCondition: result[0] < 85
+      failureLimit: 3
+      provider:
+        prometheus:
+          address: http://prometheus-service.monitoring.svc:9090
+          query: |
+            avg(container_memory_usage_bytes{{
+              container="{{ .Chart.Name }}",
+              pod=~"{{ args.service-name }}-.*"
+            }}) /
+            avg(container_spec_memory_limit_bytes{{
+              container="{{ .Chart.Name }}",
+              pod=~"{{ args.service-name }}-.*"
+            }}) * 100
+
+---
+# Pre-promotion Analysis Template
+# Runs analysis on the preview (Green) stack before traffic is switched
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "leaseflow-backend.fullname" . }}-pre-promotion-analysis
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: web-check
+      interval: 30s
+      count: 5
+      # Web check must succeed
+      successCondition: result[0] == 200
+      failureLimit: 1
+      provider:
+        web:
+          url: http://{{ args.service-name }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}/health
+          jsonPath: "{$.status}"
+    - name: graphql-check
+      interval: 30s
+      count: 5
+      # GraphQL endpoint must be accessible
+      successCondition: result[0] == 200
+      failureLimit: 1
+      provider:
+        web:
+          url: http://{{ args.service-name }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}/graphql
+          method: POST
+          body: '{"query":"{ __typename }"}'
+          jsonPath: "{$.status}"
+    - name: database-connectivity
+      interval: 30s
+      count: 3
+      # Database connectivity check
+      successCondition: result[0] == true
+      failureLimit: 1
+      provider:
+        job:
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: db-check
+                    image: postgres:15-alpine
+                    command:
+                      - sh
+                      - -c
+                      - |
+                        pg_isready -h {{ .Values.configMap.data.DB_HOST }} \
+                                  -p {{ .Values.configMap.data.DB_PORT }} \
+                                  -U {{ .Values.secrets.data.DB_USER }}
+                restartPolicy: Never
+                backoffLimit: 0
+
+---
+# Post-promotion Analysis Template
+# Runs analysis on the active stack after traffic is switched
+# Automatically rolls back if errors spike within 5 minutes
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "leaseflow-backend.fullname" . }}-post-promotion-analysis
+spec:
+  args:
+    - name: service-name
+  metrics:
+    - name: error-spike-detection
+      interval: 30s
+      count: 10  # 5 minutes total (30s * 10)
+      # Error rate must not spike above 10%
+      successCondition: result[0] <= 0.10
+      failureLimit: 2  # Fail after 2 consecutive failures
+      provider:
+        prometheus:
+          address: http://prometheus-service.monitoring.svc:9090
+          query: |
+            sum(rate(http_requests_total{{
+              service="{{ args.service-name }}",
+              status_code=~"5.."
+            }}[30s]))
+            /
+            sum(rate(http_requests_total{{
+              service="{{ args.service-name }}"
+            }}[30s]))
+    - name: latency-spike-detection
+      interval: 30s
+      count: 10
+      # P95 latency must not spike above 3 seconds
+      successCondition: result[0] < 3000
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus-service.monitoring.svc:9090
+          query: |
+            histogram_quantile(0.95,
+              sum(rate(http_request_duration_seconds_bucket{{
+                service="{{ args.service-name }}"
+              }}[30s])) by (le)
+            )
+    - name: request-throughput
+      interval: 30s
+      count: 10
+      # Throughput must not drop below 50% of baseline
+      successCondition: result[0] >= 0.5
+      failureLimit: 2
+      provider:
+        prometheus:
+          address: http://prometheus-service.monitoring.svc:9090
+          query: |
+            sum(rate(http_requests_total{{
+              service="{{ args.service-name }}"
+            }}[30s]))
+            /
+            sum(rate(http_requests_total{{
+              service="{{ args.service-name }}"
+            }}[5m]))[5m:5m]
+{{- end }}

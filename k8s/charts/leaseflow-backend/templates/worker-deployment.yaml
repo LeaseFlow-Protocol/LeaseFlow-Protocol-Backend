@@ -1,0 +1,171 @@
+{{- if .Values.workers.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "leaseflow-backend.fullname" . }}-worker
+  labels:
+    {{- include "leaseflow-backend.labels" . | nindent 4 }}
+    app.kubernetes.io/component: worker
+spec:
+  {{- if not .Values.workers.autoscaling.enabled }}
+  replicas: {{ .Values.workers.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "leaseflow-backend.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  {{- with .Values.workers.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/secrets: {{ include (print $.Template.BasePath "/secrets.yaml") . | sha256sum }}
+        {{- with .Values.workers.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "leaseflow-backend.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "leaseflow-backend.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        # Wait for Redis to be ready
+        - name: wait-for-redis
+          image: redis:7-alpine
+          command:
+            - sh
+            - -c
+            - |
+              until redis-cli -h {{ .Values.configMap.data.REDIS_HOST }} -p {{ .Values.configMap.data.REDIS_PORT }} ping; do
+                echo "Waiting for Redis..."
+                sleep 2
+              done
+      containers:
+        # Soroban Indexer worker
+        - name: soroban-indexer
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - node
+            - worker.js
+            - --type
+            - soroban-indexer
+          env:
+            # Environment variables from ConfigMap
+            {{- range $key, $value := .Values.configMap.data }}
+            - name: {{ $key }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $.Values.configMap.name }}
+                  key: {{ $key }}
+            {{- end }}
+            # Environment variables from Secrets
+            {{- range $key, $value := .Values.secrets.data }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secrets.name }}
+                  key: {{ $key }}
+            {{- end }}
+            # Worker-specific environment variables
+            - name: WORKER_TYPE
+              value: "soroban-indexer"
+            {{- with .Values.workers.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          # Resource limits
+          resources:
+            {{- toYaml .Values.workers.resources | nindent 12 }}
+          # Liveness probe
+          livenessProbe:
+            {{- toYaml .Values.workers.livenessProbe | nindent 12 }}
+          # Readiness probe
+          readinessProbe:
+            {{- toYaml .Values.workers.readinessProbe | nindent 12 }}
+          # Volume mounts
+          volumeMounts:
+            {{- range .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        # Webhook worker
+        - name: webhook-worker
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - node
+            - worker.js
+            - --type
+            - webhook
+          env:
+            # Environment variables from ConfigMap
+            {{- range $key, $value := .Values.configMap.data }}
+            - name: {{ $key }}
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ $.Values.configMap.name }}
+                  key: {{ $key }}
+            {{- end }}
+            # Environment variables from Secrets
+            {{- range $key, $value := .Values.secrets.data }}
+            - name: {{ $key }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secrets.name }}
+                  key: {{ $key }}
+            {{- end }}
+            # Worker-specific environment variables
+            - name: WORKER_TYPE
+              value: "webhook"
+            {{- with .Values.workers.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          # Resource limits
+          resources:
+            {{- toYaml .Values.workers.resources | nindent 12 }}
+          # Liveness probe
+          livenessProbe:
+            {{- toYaml .Values.workers.livenessProbe | nindent 12 }}
+          # Readiness probe
+          readinessProbe:
+            {{- toYaml .Values.workers.readinessProbe | nindent 12 }}
+          # Volume mounts
+          volumeMounts:
+            {{- range .Values.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      # Volumes
+      volumes:
+        {{- range .Values.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      # Node selector
+      {{- with .Values.workers.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Affinity
+      {{- with .Values.workers.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Tolerations
+      {{- with .Values.workers.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Termination grace period for graceful shutdown
+      terminationGracePeriodSeconds: 60
+{{- end }}
