@@ -62,9 +62,9 @@ router.post('/serve', requireServices, async (req, res) => {
       });
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(tenantEmail)) {
+    // Validate email format (ReDoS-safe - Issue #134)
+    const { isValidEmail } = require('../middleware/redosProtection');
+    if (!isValidEmail(tenantEmail)) {
       return res.status(400).json({
         error: 'Invalid email format',
         field: 'tenantEmail'

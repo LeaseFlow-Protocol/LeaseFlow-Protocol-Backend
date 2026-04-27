@@ -109,6 +109,12 @@ const { initializeGraphQL } = require("./src/graphql/server");
 // Graceful Shutdown Service (#117)
 const { GracefulShutdownService } = require("./src/services/gracefulShutdownService");
 
+// Issue #131: Enhanced Rate Limiting (auth/tenant differentiation)
+const { authRateLimit, apiRateLimit } = require("./src/middleware/rateLimitMiddleware");
+
+// Issue #132: SIEM Audit Logging Interceptor
+const { SiemAuditService, createSiemInterceptor } = require("./src/middleware/siemAuditInterceptor");
+
 /**
  * Build authentication middleware for landlords and tenants.
  *
@@ -279,6 +285,14 @@ function createApp(dependencies = {}) {
   const auditService = new AuditService(database);
   app.locals.auditService = auditService;
 
+  // Issue #132: SIEM Audit Logging Interceptor
+  const siemAuditService = new SiemAuditService(config.redis || {});
+  app.locals.siemAuditService = siemAuditService;
+  app.use(createSiemInterceptor(siemAuditService));
+
+  // Issue #131: General API rate limiting (authenticated: 200/min, anonymous: 100/min)
+  app.use('/api', apiRateLimit());
+
   // Static Files
   const uploadDir = path.join(__dirname, "uploads");
   if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
@@ -351,7 +365,8 @@ function createApp(dependencies = {}) {
   app.use('/api/v1/leases', leaseContractRoutes);
   app.use('/api/v1/rwa', rwaAssetRoutes);
   app.use('/api/owners', ownerRoutes);
-  app.use('/api/kyc', kycRoutes);
+  // Issue #131: Strict auth rate limit (10/min per IP) on authentication endpoints
+  app.use('/api/kyc', authRateLimit(), kycRoutes);
   app.use('/api/sanctions', sanctionsRoutes);
   app.use('/api/eviction-notices', evictionNoticeRoutes);
   app.use('/api/vendors', vendorRoutes);
@@ -359,7 +374,9 @@ function createApp(dependencies = {}) {
   app.use('/api/properties', propertyRoutes);
   app.use('/api/market-trends', marketTrendsRoutes);
   app.use('/api/referrals', referralRoutes);
-  app.use('/api/v1/oracles', oracleRoutes(database));
+  // Issue #134: IoT input hardening - validate and sanitize all IoT/oracle inputs
+  const { iotInputGuard } = require('./src/middleware/redosProtection');
+  app.use('/api/v1/oracles', iotInputGuard(), oracleRoutes(database));
   app.use('/api/v1/leases/abandoned', createAbandonedAssetRoutes(database, new NotificationService(database)));
   app.use('/api', createPaymentRoutes(database));
   app.use('/api/audit', createAuditRoutes(database));
