@@ -159,6 +159,59 @@ resource "cloudflare_load_balancer" "main" {
   notification_email = "devops@leaseflow.io"
 }
 
+# ============================================================
+# Issue #131: WAF Rules for API Rate Limiting & DDoS Protection
+# ============================================================
+
+# Block known malicious IPs, Tor exit nodes, and automated bots
+resource "cloudflare_ruleset" "waf_rules" {
+  zone_id     = var.zone_id
+  name        = "LeaseFlow WAF Rules"
+  description = "WAF rules for API protection - Issue #131"
+  kind        = "zone"
+  phase       = "http_request_firewall_custom"
+
+  # Rule 1: Block Tor exit nodes and known malicious ASNs
+  rules {
+    action      = "block"
+    description = "Block Tor exit nodes and high-risk ASNs"
+    enabled     = true
+    expression  = "(ip.src in $cf.open_proxies) or (cf.threat_score gt 50)"
+  }
+
+  # Rule 2: Block automated headless browsers (no JS challenge support)
+  rules {
+    action      = "managed_challenge"
+    description = "Challenge automated/headless browser traffic"
+    enabled     = true
+    expression  = "(cf.bot_management.score lt 30) and (not cf.bot_management.verified_bot)"
+  }
+
+  # Rule 3: Rate limit auth endpoints - 10 attempts/min per IP
+  rules {
+    action      = "block"
+    description = "Block excessive auth attempts (>10/min per IP)"
+    enabled     = true
+    expression  = "(http.request.uri.path matches \"^/api/(auth|kyc|login|token)\") and (rate(http.request.uri.path, 60) gt 10)"
+  }
+
+  # Rule 4: Rate limit general API - 200 req/min per IP at edge
+  rules {
+    action      = "block"
+    description = "Block excessive general API requests (>200/min per IP)"
+    enabled     = true
+    expression  = "(http.request.uri.path matches \"^/api/\") and (rate(http.request.uri.path, 60) gt 200)"
+  }
+
+  # Rule 5: Block common attack payloads before they reach K8s
+  rules {
+    action      = "block"
+    description = "Block SQL injection and XSS payloads at edge"
+    enabled     = true
+    expression  = "(http.request.uri.query contains \"UNION SELECT\") or (http.request.uri.query contains \"<script\") or (http.request.body contains \"UNION SELECT\")"
+  }
+}
+
 # Output the load balancer details
 output "load_balancer_hostname" {
   value       = cloudflare_load_balancer.main.hostname

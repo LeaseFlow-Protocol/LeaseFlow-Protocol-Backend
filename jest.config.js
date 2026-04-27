@@ -1,6 +1,6 @@
 module.exports = {
   testEnvironment: 'node',
-  testMatch: ['**/src/tests/**/*.test.js'],
+  testMatch: ['**/src/tests/**/*.test.js', '**/tests/**/*.test.js'],
   collectCoverageFrom: [
     'src/services/**/*.js',
     'src/controllers/**/*.js',

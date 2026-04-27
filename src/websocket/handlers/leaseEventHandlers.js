@@ -264,8 +264,9 @@ class LeaseEventHandlers {
       const leaseId = eventData.leaseId;
       
       // Check that no other lease IDs are present in the data
-      const dataString = JSON.stringify(eventData);
-      const leaseIdPattern = /[a-zA-Z0-9_-]+/g;
+      // ReDoS-safe: limit dataString length before regex (Issue #134)
+      const dataString = JSON.stringify(eventData).slice(0, 4096);
+      const leaseIdPattern = /[a-zA-Z0-9_-]{1,128}/g;
       const foundIds = dataString.match(leaseIdPattern);
       
       if (foundIds && foundIds.length > 1) {
@@ -296,8 +297,9 @@ class LeaseEventHandlers {
    * @returns {boolean} True if looks like lease ID
    */
   looksLikeLeaseId(id) {
-    // Simple heuristic for lease ID format
-    return /^[a-zA-Z0-9_-]{8,}$/.test(id);
+    // ReDoS-safe: bounded quantifier + length pre-check (Issue #134)
+    if (typeof id !== 'string' || id.length < 8 || id.length > 128) return false;
+    return /^[a-zA-Z0-9_-]{8,128}$/.test(id);
   }
 
   /**
