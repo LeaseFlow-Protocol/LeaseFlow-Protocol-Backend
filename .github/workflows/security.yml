@@ -20,9 +20,8 @@ jobs:
         uses: trufflesecurity/trufflehog@v3.88.1
         with:
           # On PRs scan only the new commits; on push scan the full history
-          extra_args: >-
-            --only-verified
-            --fail
+          extra_args: --only-verified
+          fail: true
 
   trivy-image-scan:
     name: Trivy Container Image Scan
@@ -35,7 +34,7 @@ jobs:
         run: docker build -t leaseflow-backend:${{ github.sha }} .
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.30.1
         with:
           image-ref: leaseflow-backend:${{ github.sha }}
           format: table
