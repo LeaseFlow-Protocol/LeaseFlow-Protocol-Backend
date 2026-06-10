@@ -1,4 +1,4 @@
-const { getUSDCToFiatRates } = require('./priceFeedService');
+const { getUSDCToFiatRates } = require('../../services/priceFeedService');
 
 /**
  * Monthly Recurring Revenue (MRR) Aggregator Service

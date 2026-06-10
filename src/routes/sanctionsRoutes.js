@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const SanctionsListScreeningWorker = require('../services/sanctionsListScreeningWorker');
+const SanctionsListScreeningWorker = require('../../services/sanctionsListScreeningWorker');
 const { AppDatabase } = require('../src/db/appDatabase');
 
 /**

@@ -1,4 +1,4 @@
-const { AppDatabase } = require('../../db/appDatabase');
+const { AppDatabase } = require('../db/appDatabase');
 const { AbandonedAssetTracker } = require('../services/abandonedAssetTracker');
 const { NotificationService } = require('../services/notificationService');
 

@@ -1,4 +1,4 @@
-const { getUSDCToFiatRates } = require('../services/priceFeedService');
+const { getUSDCToFiatRates } = require('../../services/priceFeedService');
 
 /**
  * Fiat-to-Crypto Rent Proration Calculator Engine

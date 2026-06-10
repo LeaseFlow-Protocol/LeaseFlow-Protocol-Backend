@@ -408,7 +408,7 @@ module.exports = {
   SubscriptionManager,
   LeaseEventPublisher,
   AssetEventPublisher,
-  ConditionReportPublisher,
+  ConditionReportEventPublisher as ConditionReportPublisher,
   PaymentEventPublisher,
   MaintenanceEventPublisher,
   IoTEventPublisher,

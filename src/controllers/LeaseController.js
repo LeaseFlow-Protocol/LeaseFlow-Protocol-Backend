@@ -122,6 +122,8 @@ class LeaseController {
             console.error('[LeaseController] Error fetching active leases:', error);
             return res.status(500).json({ error: 'Internal server error while retrieving active leases.', details: error.message });
         }
+    }
+
     /**
      * Retrieves the lease hierarchy for a given lease ID.
      * Implements strict access controls: master lessor sees tree, sub-lessee sees only their node.

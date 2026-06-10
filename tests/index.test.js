@@ -1,22 +1,4 @@
 const request = require('supertest');
-const {
-  app,
-  listings,
-  resetListings,
-  hasPositiveTrustline,
-} = require('../index');
-
-describe('LeaseFlow Backend API', () => {
-  beforeEach(() => {
-    resetListings();
-    global.fetch = jest.fn();
-  });
-
-  afterEach(() => {
-    jest.resetAllMocks();
-  });
-
-
 const { createApp } = require('../index');
 const { loadConfig } = require('../src/config');
 const { AppDatabase } = require('../src/db/appDatabase');
@@ -292,6 +274,8 @@ describe('LeaseFlow Backend API', () => {
         'GISSUERTRUST'
       )
     ).toBe(false);
+  });
+
   it('generates a proposal for an active lease expiring in 60 days', () => {
     seedEligibleLease();
 

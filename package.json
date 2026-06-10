@@ -60,7 +60,8 @@
     "socket.io": "^4.7.5",
     "socket.io-redis-adapter": "^8.3.0",
     "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1"
+    "swagger-ui-express": "^5.0.1",
+    "winston": "^3.19.0"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
