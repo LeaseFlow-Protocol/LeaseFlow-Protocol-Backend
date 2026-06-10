@@ -76,6 +76,11 @@ class AppDatabase {
         sanctions_check_at TEXT,
         sanctions_violation_count INTEGER DEFAULT 0,
         parent_lease_id TEXT,
+        purchase_option_enabled INTEGER DEFAULT 0,
+        purchase_option_rent_share REAL DEFAULT 0,
+        purchase_credit REAL DEFAULT 0,
+        remaining_balance REAL DEFAULT 0,
+        applied_late_fee REAL DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (parent_lease_id) REFERENCES leases(id) ON DELETE CASCADE

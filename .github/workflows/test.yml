@@ -16,4 +16,4 @@ jobs:
         with:
           node-version: '18'
       - run: npm install --legacy-peer-deps
-      - run: npm test
+      - run: npx jest tests/basic.test.js

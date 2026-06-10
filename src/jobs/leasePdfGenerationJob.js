@@ -1,5 +1,5 @@
 const { Queue, Worker } = require('bullmq');
-const { Worker: RedisWorker } = require('ioredis');
+const Redis = require('ioredis');
 const LeasePdfService = require('../services/leasePdfService');
 const IpfsService = require('../services/ipfsService');
 const { AppDatabase } = require('../db/appDatabase');
@@ -16,7 +16,7 @@ class LeasePdfGenerationJob {
     this.ipfsService = new IpfsService(config);
     
     // Redis connection for BullMQ
-    this.redisConnection = new RedisWorker(config.redis);
+    this.redisConnection = new Redis(config.redis);
     
     // Queue for PDF generation jobs
     this.queue = new Queue('lease-pdf-generation', {

@@ -7,6 +7,11 @@ describe('Yield Analytics Tests', () => {
   let yieldService;
   let mockRedisClient;
 
+  const testLeaseId = 'test-lease-123';
+  const testTxHash = 'test-tx-hash-456';
+  const testLessorPubkey = 'GBB2X7LJ5NHY6DUZ7YK5L3FQX2Z2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q';
+  const testLesseePubkey = 'GAB2X7LJ5NHY6DUZ7YK5L3FQX2Z2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q';
+
   beforeAll(async () => {
     // Initialize in-memory database for testing
     database = new AppDatabase(':memory:');
@@ -34,10 +39,6 @@ describe('Yield Analytics Tests', () => {
   });
 
   describe('Yield Earnings Database Operations', () => {
-    const testLeaseId = 'test-lease-123';
-    const testTxHash = 'test-tx-hash-456';
-    const testLessorPubkey = 'GBB2X7LJ5NHY6DUZ7YK5L3FQX2Z2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q';
-    const testLesseePubkey = 'GAB2X7LJ5NHY6DUZ7YK5L3FQX2Z2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q2Q';
 
     test('should insert and retrieve lessor yield earnings', async () => {
       const earningsData = {

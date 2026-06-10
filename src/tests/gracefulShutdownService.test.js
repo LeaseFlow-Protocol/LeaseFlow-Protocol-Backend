@@ -11,6 +11,7 @@ describe('GracefulShutdownService', () => {
     // Mock Express app
     mockApp = {
       get: jest.fn(),
+      use: jest.fn(),
     };
 
     // Mock HTTP server

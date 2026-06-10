@@ -70,23 +70,27 @@ class RowLevelSecurityService {
    * Create PostgreSQL function to set current lessor context
    */
   async createLessorContextFunction() {
-    this.database.db.exec(`
-      CREATE OR REPLACE FUNCTION set_current_lessor_id(lessor_id TEXT)
-      RETURNS VOID AS $$
-      BEGIN
-        PERFORM set_config('app.current_lessor_id', lessor_id, true);
-      END;
-      $$ LANGUAGE plpgsql SECURITY DEFINER;
+    try {
+      this.database.db.exec(`
+        CREATE OR REPLACE FUNCTION set_current_lessor_id(lessor_id TEXT)
+        RETURNS VOID AS $$
+        BEGIN
+          PERFORM set_config('app.current_lessor_id', lessor_id, true);
+        END;
+        $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-      CREATE OR REPLACE FUNCTION get_current_lessor_id()
-      RETURNS TEXT AS $$
-      BEGIN
-        RETURN current_setting('app.current_lessor_id', true);
-      END;
-      $$ LANGUAGE plpgsql SECURITY DEFINER;
-    `);
+        CREATE OR REPLACE FUNCTION get_current_lessor_id()
+        RETURNS TEXT AS $$
+        BEGIN
+          RETURN current_setting('app.current_lessor_id', true);
+        END;
+        $$ LANGUAGE plpgsql SECURITY DEFINER;
+      `);
 
-    console.log('[RLS] Created lessor context functions');
+      console.log('[RLS] Created lessor context functions');
+    } catch (error) {
+      console.warn('[RLS] Could not create lessor context functions (SQLite mode):', error.message);
+    }
   }
 
   /**

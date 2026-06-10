@@ -1,3 +1,4 @@
+const EventEmitter = require('events');
 const RwaCacheSyncJob = require('../../src/jobs/rwaCacheSyncJob');
 const RwaCacheService = require('../../src/services/rwa/rwaCacheService');
 const RwaAdapterRegistry = require('../../src/services/rwa/rwaAdapterRegistry');

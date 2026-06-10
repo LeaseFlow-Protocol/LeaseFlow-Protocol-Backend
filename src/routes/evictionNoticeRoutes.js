@@ -1,6 +1,6 @@
 const express = require('express');
-const EmergencyEvictionNoticeService = require('../services/emergencyEvictionNoticeService');
-const DatabaseService = require('../services/databaseService');
+const EmergencyEvictionNoticeService = require('../../services/emergencyEvictionNoticeService');
+const DatabaseService = require('../../services/databaseService');
 
 const router = express.Router();
 

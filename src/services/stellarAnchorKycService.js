@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { Server } = require('@stellar/stellar-sdk');
+const { Horizon } = require('@stellar/stellar-sdk');
 
 /**
  * Stellar Anchor KYC Service implementing SEP-12 standards.
@@ -19,7 +19,7 @@ class StellarAnchorKycService {
     this.anchorUrl = config.anchorUrl || process.env.STELLAR_ANCHOR_URL;
     this.anchorAuthKey = config.anchorAuthKey || process.env.STELLAR_ANCHOR_AUTH_KEY;
     this.horizonUrl = config.horizonUrl || process.env.HORIZON_URL || 'https://horizon.stellar.org';
-    this.server = new Server(this.horizonUrl);
+    this.server = new Horizon.Server(this.horizonUrl);
   }
 
   /**

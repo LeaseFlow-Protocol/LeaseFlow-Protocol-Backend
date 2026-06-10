@@ -88,7 +88,7 @@ describe('Helm Chart Validation', () => {
         expect(output).toContain('wait-for-db');
         expect(output).toContain('wait-for-redis');
       } catch (error) {
-        fail(`Deployment template validation failed: ${error.message}`);
+        throw error;
       }
     });
 
@@ -104,7 +104,7 @@ describe('Helm Chart Validation', () => {
         expect(output).toContain('name: http');
         expect(output).toContain('name: metrics');
       } catch (error) {
-        fail(`Service template validation failed: ${error.message}`);
+        throw error;
       }
     });
 
@@ -120,7 +120,7 @@ describe('Helm Chart Validation', () => {
         expect(output).toContain('nginx.ingress.kubernetes.io/ssl-redirect');
         expect(output).toContain('secretName: leaseflow-backend-tls');
       } catch (error) {
-        fail(`Ingress template validation failed: ${error.message}`);
+        throw error;
       }
     });
 
@@ -134,7 +134,7 @@ describe('Helm Chart Validation', () => {
         expect(output).toContain('kind: PodDisruptionBudget');
         expect(output).toContain('minAvailable: 2');
       } catch (error) {
-        fail(`PDB template validation failed: ${error.message}`);
+        throw error;
       }
     });
 
@@ -150,7 +150,7 @@ describe('Helm Chart Validation', () => {
         expect(output).toContain('maxReplicas: 10');
         expect(output).toContain('targetCPUUtilizationPercentage: 70');
       } catch (error) {
-        fail(`HPA template validation failed: ${error.message}`);
+        throw error;
       }
     });
 
@@ -165,7 +165,7 @@ describe('Helm Chart Validation', () => {
         expect(output).toContain('port: metrics');
         expect(output).toContain('path: /metrics');
       } catch (error) {
-        fail(`ServiceMonitor template validation failed: ${error.message}`);
+        throw error;
       }
     });
   });
@@ -177,7 +177,7 @@ describe('Helm Chart Validation', () => {
           stdio: 'pipe'
         });
       } catch (error) {
-        fail(`Helm lint failed: ${error.message}`);
+        throw error;
       }
     });
 
@@ -187,7 +187,7 @@ describe('Helm Chart Validation', () => {
           stdio: 'pipe'
         });
       } catch (error) {
-        fail(`Template rendering failed: ${error.message}`);
+        throw error;
       }
     });
 
@@ -197,7 +197,7 @@ describe('Helm Chart Validation', () => {
           stdio: 'pipe'
         });
       } catch (error) {
-        fail(`Helm validation failed: ${error.message}`);
+        throw error;
       }
     });
   });
@@ -220,7 +220,7 @@ describe('Helm Chart Validation', () => {
         expect(output).toContain('ALL');
         expect(output).toContain('readOnlyRootFilesystem: true');
       } catch (error) {
-        fail(`Security context validation failed: ${error.message}`);
+        throw error;
       }
     });
 
@@ -237,7 +237,7 @@ describe('Helm Chart Validation', () => {
         expect(output).toContain('cpu:');
         expect(output).toContain('memory:');
       } catch (error) {
-        fail(`Resource limits validation failed: ${error.message}`);
+        throw error;
       }
     });
 
@@ -254,7 +254,7 @@ describe('Helm Chart Validation', () => {
         expect(output).toContain('path: /health');
         expect(output).toContain('path: /ready');
       } catch (error) {
-        fail(`Health checks validation failed: ${error.message}`);
+        throw error;
       }
     });
   });
