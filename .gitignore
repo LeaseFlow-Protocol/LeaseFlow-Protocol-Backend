@@ -1,5 +1,5 @@
 AGENTS.mddatabase.sqlite
 data
-.env
 logs/
 node_modules
+config.bat

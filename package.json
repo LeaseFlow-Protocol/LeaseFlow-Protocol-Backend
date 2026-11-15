@@ -4,9 +4,9 @@
   "description": "Indexer for LeaseFlow Protocol",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
-    "start:gateway": "node src/gateway/index.js",
-    "start:subgraph": "node index.js",
+    "start": "node init && node index.js",
+    "start:gateway": "node init && node src/gateway/index.js",
+    "start:subgraph": "node init && node index.js",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
